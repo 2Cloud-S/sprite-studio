@@ -22,6 +22,8 @@ export interface RuntimeSettings {
   pivotX: number;
   pivotY: number;
   neutralHeightTarget: number | null;
+  neutralTolerancePx: number;
+  geometryPolicy: "flexible" | "locked";
   sourceFacings: Facing[];
   mirroredFacings: Record<string, string>;
 }
@@ -56,10 +58,39 @@ export interface SnapReview {
   outputs: SnapOutputPaths | null;
   colors: number;
   pixelSize: number | null;
+  detectedPixelSize: number | null;
+  autoFitRunId: string | null;
   palette: string | null;
   toolVersion: string;
   createdAt: string;
   appliedAt: string | null;
+}
+
+export interface AutoFitCandidate {
+  reviewId: string;
+  pixelSize: number;
+  foregroundWidth: number;
+  foregroundHeight: number;
+  foregroundPixels: number;
+  removedSpecklePixels: number;
+  fits: boolean;
+}
+
+export interface AutoFitRun {
+  id: string;
+  facing: Facing;
+  sourceImportId: string;
+  cellWidth: number;
+  cellHeight: number;
+  pivotX: number;
+  pivotY: number;
+  neutralHeightTarget: number | null;
+  neutralTolerancePx: number;
+  startingPixelSize: number;
+  candidates: AutoFitCandidate[];
+  recommendedReviewIds: string[];
+  selectedReviewId: string | null;
+  createdAt: string;
 }
 
 export interface CleanupOptions {
@@ -120,6 +151,7 @@ export interface Project {
   anchors: Record<string, AnchorAssignment>;
   imports: ImportRecord[];
   snapReviews: SnapReview[];
+  autoFitRuns: AutoFitRun[];
   cleanupReviews: CleanupReview[];
   animations: Animation[];
 }
@@ -180,7 +212,10 @@ export interface RawAnimationFrame {
 
 export interface BatchFrameArtifact { sourceFrameId: string; relativePath: string; sha256: string; width: number; height: number; upscaledRelativePath: string | null; chromaRelativePath: string | null; outputs: SnapOutputPaths | null; }
 export interface UpscaledFrame { id: string; snapReviewId: string; sourceFrameId: string; version: number; originalName: string; relativePath: string; sha256: string; width: number; height: number; importedAt: string; }
-export interface BatchSnapReview { id: string; extractionId: string; sourceFrameIds: string[]; frames: BatchFrameArtifact[]; colors: number; pixelSize: number | null; palette: string | null; toolVersion: string; createdAt: string; appliedAt: string | null; }
+export interface BatchSnapReview { id: string; extractionId: string; sourceFrameIds: string[]; frames: BatchFrameArtifact[]; colors: number; pixelSize: number | null; detectedPixelSize: number | null; autoFitRunId: string | null; palette: string | null; toolVersion: string; createdAt: string; appliedAt: string | null; }
+export interface BatchAutoFitFrame { sourceFrameId: string; foregroundWidth: number; foregroundHeight: number; foregroundPixels: number; removedSpecklePixels: number; fits: boolean; }
+export interface BatchAutoFitCandidate { reviewId: string; pixelSize: number; frames: BatchAutoFitFrame[]; fits: boolean; worstTargetDelta: number | null; totalForegroundPixels: number; totalSpeckleLoss: number; }
+export interface BatchAutoFitRun { id: string; extractionId: string; sourceFrameIds: string[]; cellWidth: number; cellHeight: number; pivotX: number; pivotY: number; neutralHeightTarget: number | null; neutralTolerancePx: number; startingPixelSize: number; candidates: BatchAutoFitCandidate[]; recommendedReviewIds: string[]; selectedReviewId: string | null; createdAt: string; }
 export interface BatchCleanupFrame { sourceFrameId: string; cleanedRelativePath: string; cleanedSha256: string; normalizedRelativePath: string; normalizedSha256: string; foregroundPixels: number; }
 export interface BatchCleanupReview { id: string; snapReviewId: string; upscaleFrameIds: string[]; frames: BatchCleanupFrame[]; backgroundHex: string; tolerance: number; minArea: number; greenFringeDespeckle: boolean; pythonEnvironment: string; createdAt: string; appliedAt: string | null; }
 
@@ -258,6 +293,7 @@ export interface Animation {
   rawFrames: RawAnimationFrame[];
   activeRawFrameIds: string[];
   batchSnaps: BatchSnapReview[];
+  batchAutoFitRuns: BatchAutoFitRun[];
   activeBatchSnapId: string | null;
   upscaledFrames: UpscaledFrame[];
   activeUpscaledFrameIds: Record<string, string>;

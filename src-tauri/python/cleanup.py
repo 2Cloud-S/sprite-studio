@@ -9,6 +9,32 @@ import numpy as np
 from PIL import Image
 
 PROCESSOR_VERSION = "sprite-studio-cleanup-1"
+FIT_ERROR_PREFIX = "SPRITE_STUDIO_FIT:"
+
+
+def suggested_runtime(cell_width: int, cell_height: int, pivot_x: int, pivot_y: int,
+                      bbox_width: int, bbox_height: int) -> dict | None:
+    """Grow an editable cell without changing the pixel grid or bottom margin."""
+    horizontal_offset = pivot_x - cell_width // 2
+    bottom_margin = cell_height - 1 - pivot_y
+    width = cell_width
+    while width <= 1024:
+        suggested_x = width // 2 + horizontal_offset
+        left = suggested_x - bbox_width // 2
+        if 0 <= left and left + bbox_width <= width and 0 <= suggested_x < width:
+            break
+        width = ((width + 16) // 16) * 16
+    height = cell_height
+    while height <= 1024 and height - 1 - bottom_margin < bbox_height - 1:
+        height = ((height + 16) // 16) * 16
+    if width > 1024 or height > 1024:
+        return None
+    return {
+        "cellWidth": width,
+        "cellHeight": height,
+        "pivotX": width // 2 + horizontal_offset,
+        "pivotY": height - 1 - bottom_margin,
+    }
 
 
 def color_value(value: str, pixels: np.ndarray) -> np.ndarray:
@@ -32,6 +58,7 @@ def main() -> None:
     parser.add_argument("pivot_x", type=int)
     parser.add_argument("pivot_y", type=int)
     parser.add_argument("fringe_cleanup", nargs="?", default="1")
+    parser.add_argument("--inspect-only", action="store_true")
     args = parser.parse_args()
 
     with Image.open(args.source) as image:
@@ -41,11 +68,20 @@ def main() -> None:
     difference = pixels[:, :, :3].astype(np.int16) - background
     chroma = np.sum(difference.astype(np.int32) ** 2, axis=2) <= args.tolerance ** 2
     if args.fringe_cleanup == "1" and int(background[1]) > int(background[0]) + 80 and int(background[1]) > int(background[2]) + 80:
-        # Remove only green halo pixels next to keyed background. Avoid global
-        # green removal so interior costume colors remain intact.
+        # The snapper can turn a bright-green backdrop into isolated, much
+        # darker green pixels at the contour. A narrow RGB radius misses them.
+        # Key only green-derived colors within two pixels of the original
+        # chroma region; never remove green globally from the character.
         near = np.max(np.abs(difference), axis=2) <= max(48, args.tolerance * 2)
-        adjacent = cv2.dilate(chroma.astype(np.uint8), np.ones((3, 3), dtype=np.uint8)).astype(bool)
-        chroma |= near & adjacent
+        adjacent_one = cv2.dilate(chroma.astype(np.uint8), np.ones((3, 3), dtype=np.uint8)).astype(bool)
+        adjacent_two = cv2.dilate(chroma.astype(np.uint8), np.ones((5, 5), dtype=np.uint8)).astype(bool)
+        red = pixels[:, :, 0].astype(np.int16)
+        green = pixels[:, :, 1].astype(np.int16)
+        blue = pixels[:, :, 2].astype(np.int16)
+        green_bleed = (green >= 60) & (green >= red + 40) & (green >= blue + 40)
+        green_bleed &= (red <= max(64, int(background[0]) + 50))
+        green_bleed &= (blue <= max(64, int(background[2]) + 50))
+        chroma |= (near & adjacent_one) | (green_bleed & adjacent_two)
     foreground = (pixels[:, :, 3] >= 128) & ~chroma
     before = int(np.count_nonzero(foreground))
 
@@ -64,8 +100,30 @@ def main() -> None:
     bbox_width, bbox_height = x1 - x0, y1 - y0
     placement_x = args.pivot_x - bbox_width // 2
     placement_y = args.pivot_y - bbox_height + 1
-    if placement_x < 0 or placement_y < 0 or placement_x + bbox_width > args.cell_width or placement_y + bbox_height > args.cell_height:
-        raise ValueError("Foreground exceeds the fixed runtime cell at its pivot; revise the source instead of scaling it")
+    fits = placement_x >= 0 and placement_y >= 0 and placement_x + bbox_width <= args.cell_width and placement_y + bbox_height <= args.cell_height
+    if args.inspect_only:
+        print(json.dumps({
+            "processorVersion": PROCESSOR_VERSION,
+            "foregroundWidth": bbox_width,
+            "foregroundHeight": bbox_height,
+            "foregroundPixels": remaining,
+            "removedSpecklePixels": before - remaining,
+            "placementX": placement_x,
+            "placementY": placement_y,
+            "fits": fits,
+        }))
+        return
+    if not fits:
+        raise ValueError(FIT_ERROR_PREFIX + json.dumps({
+            "foregroundWidth": bbox_width,
+            "foregroundHeight": bbox_height,
+            "cellWidth": args.cell_width,
+            "cellHeight": args.cell_height,
+            "pivotX": args.pivot_x,
+            "pivotY": args.pivot_y,
+            "suggested": suggested_runtime(args.cell_width, args.cell_height,
+                                            args.pivot_x, args.pivot_y, bbox_width, bbox_height),
+        }, separators=(",", ":")))
 
     pixels[:, :, 3] = np.where(foreground, 255, 0).astype(np.uint8)
     pixels[~foreground, :3] = 0

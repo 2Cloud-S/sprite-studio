@@ -27,7 +27,8 @@ export const desktop = {
   openProject: (projectId: string) =>
     invoke<Project>("open_project", { projectId }),
   updateWorkflow: (projectId: string, workflow: WorkflowSettings) => invoke<Project>("update_workflow", { projectId, workflow }),
-  updateRuntime: (projectId: string, cellWidth: number, cellHeight: number, pivotX: number, pivotY: number) => invoke<Project>("update_runtime", { projectId, cellWidth, cellHeight, pivotX, pivotY }),
+  updateRuntime: (projectId: string, cellWidth: number, cellHeight: number, pivotX: number, pivotY: number, anchorMode: WorkflowSettings["anchorMode"]) => invoke<Project>("update_runtime", { projectId, cellWidth, cellHeight, pivotX, pivotY, anchorMode }),
+  updateRuntimePolicy: (projectId: string, geometryPolicy: Project["runtime"]["geometryPolicy"], neutralHeightTarget: number | null, neutralTolerancePx: number) => invoke<Project>("update_runtime_policy", { projectId, geometryPolicy, neutralHeightTarget, neutralTolerancePx }),
   confirmNativeReview: (projectId: string, animationId: string, acceptedFrameIds: string[]) => invoke<Project>("confirm_native_review", { projectId, animationId, acceptedFrameIds }),
   replaceRawFrame: (projectId: string, animationId: string, frameId: string, sourcePath: string | null, crop: ManualCrop | null) => invoke<Project>("replace_raw_frame", { projectId, animationId, frameId, sourcePath, crop }),
   importUpscaledFrame: (projectId: string, animationId: string, sourceFrameId: string, sourcePath: string) => invoke<Project>("import_upscaled_frame", { projectId, animationId, sourceFrameId, sourcePath }),
@@ -51,6 +52,8 @@ export const desktop = {
   configureSnapper: (path: string) => invoke<Settings>("configure_snapper", { path }),
   runSnap: (projectId: string, facing: string, options: SnapOptions) =>
     invoke<Project>("run_snap", { projectId, facing, options }),
+  runAutoFit: (projectId: string, facing: string, cleanupOptions: CleanupOptions) =>
+    invoke<Project>("run_auto_fit", { projectId, facing, cleanupOptions }),
   applySnap: (projectId: string, reviewId: string) =>
     invoke<Project>("apply_snap", { projectId, reviewId }),
   snapPreview: (projectId: string, reviewId: string, kind: "native" | "reference") =>
@@ -98,6 +101,8 @@ export const desktop = {
     invoke<AssetPreview>("read_raw_animation_frame", { projectId, animationId, frameId }),
   runBatchSnap: (projectId: string, animationId: string, options: SnapOptions) =>
     invoke<Project>("run_batch_snap", { projectId, animationId, options }),
+  runBatchAutoFit: (projectId: string, animationId: string, cleanupOptions: CleanupOptions) =>
+    invoke<Project>("run_batch_auto_fit", { projectId, animationId, cleanupOptions }),
   applyBatchSnap: (projectId: string, animationId: string, reviewId: string) =>
     invoke<Project>("apply_batch_snap", { projectId, animationId, reviewId }),
   runBatchCleanup: (projectId: string, animationId: string, options: CleanupOptions) =>

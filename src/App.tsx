@@ -26,6 +26,7 @@ import { SnapStage } from "./SnapStage";
 import { CleanupStage } from "./CleanupStage";
 import { ReferenceExportPanel } from "./ReferenceExportPanel";
 import { AnimationWorkspace } from "./AnimationWorkspace";
+import { WorkflowSettingsPanel } from "./WorkflowSettingsPanel";
 import { WorkflowTip } from "./WorkflowTip";
 import { readablePath } from "./domain/paths";
 import type { Facing, Preset, Project } from "./types";
@@ -665,6 +666,7 @@ function App() {
                   </section>
                   {workspaceRoute === "reference" && <section id="reference-workspace" className="reference-workspace" aria-label="Single-image reference workflow">
                     <div className="anchor-heading"><div><h2>Single-image references</h2><p>Optional neutral images by facing. Import a pose board under “Pose board → animation” instead.</p></div><span>{project.runtime.sourceFacings.filter(f => project.anchors[f]?.activeImportId).length} of {project.runtime.sourceFacings.length} references</span></div>
+                    <WorkflowSettingsPanel project={project} />
                     <WorkflowTip label="Source image · suggested">Start with one neutral, full-body image on flat #00FF00 chroma, or magenta when green conflicts with the character. A 1024 × 1024 square gives grid recovery room to work; it is a generation suggestion, not the runtime size. Keep generous margins, a simple silhouette, no smoothing, and no action-only effects. For another facing, use the applied snapped reference as the identity input, then snap that new facing too.</WorkflowTip>
                     <div className="anchor-grid">
                       {project.runtime.sourceFacings.map((item) => <AnchorCard key={item} facing={item} project={project} selected={activeFacing === item} onSelect={() => selectFacing(item)} onImport={() => importFromPicker(item)} />)}

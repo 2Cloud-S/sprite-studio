@@ -85,8 +85,24 @@ pub struct RuntimeSettings {
     pub pivot_x: u32,
     pub pivot_y: u32,
     pub neutral_height_target: Option<u32>,
+    #[serde(default = "default_neutral_tolerance")]
+    pub neutral_tolerance_px: u8,
+    #[serde(default)]
+    pub geometry_policy: GeometryPolicy,
     pub source_facings: Vec<String>,
     pub mirrored_facings: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GeometryPolicy {
+    #[default]
+    Flexible,
+    Locked,
+}
+
+fn default_neutral_tolerance() -> u8 {
+    4
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -206,10 +222,45 @@ pub struct SnapReview {
     pub outputs: Option<SnapOutputPaths>,
     pub colors: u16,
     pub pixel_size: Option<u32>,
+    #[serde(default)]
+    pub detected_pixel_size: Option<f64>,
+    #[serde(default)]
+    pub auto_fit_run_id: Option<String>,
     pub palette: Option<String>,
     pub tool_version: String,
     pub created_at: DateTime<Utc>,
     pub applied_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoFitCandidate {
+    pub review_id: String,
+    pub pixel_size: f64,
+    pub foreground_width: u32,
+    pub foreground_height: u32,
+    pub foreground_pixels: u32,
+    pub removed_speckle_pixels: u32,
+    pub fits: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoFitRun {
+    pub id: String,
+    pub facing: String,
+    pub source_import_id: String,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub pivot_x: u32,
+    pub pivot_y: u32,
+    pub neutral_height_target: Option<u32>,
+    pub neutral_tolerance_px: u8,
+    pub starting_pixel_size: f64,
+    pub candidates: Vec<AutoFitCandidate>,
+    pub recommended_review_ids: Vec<String>,
+    pub selected_review_id: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -257,6 +308,8 @@ pub struct Project {
     pub imports: Vec<ImportRecord>,
     #[serde(default)]
     pub snap_reviews: Vec<SnapReview>,
+    #[serde(default)]
+    pub auto_fit_runs: Vec<AutoFitRun>,
     #[serde(default)]
     pub cleanup_reviews: Vec<CleanupReview>,
     #[serde(default)]
@@ -367,10 +420,56 @@ pub struct BatchSnapReview {
     pub frames: Vec<BatchFrameArtifact>,
     pub colors: u16,
     pub pixel_size: Option<u32>,
+    #[serde(default)]
+    pub detected_pixel_size: Option<f64>,
+    #[serde(default)]
+    pub auto_fit_run_id: Option<String>,
     pub palette: Option<String>,
     pub tool_version: String,
     pub created_at: DateTime<Utc>,
     pub applied_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAutoFitFrame {
+    pub source_frame_id: String,
+    pub foreground_width: u32,
+    pub foreground_height: u32,
+    pub foreground_pixels: u32,
+    pub removed_speckle_pixels: u32,
+    pub fits: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAutoFitCandidate {
+    pub review_id: String,
+    pub pixel_size: f64,
+    pub frames: Vec<BatchAutoFitFrame>,
+    pub fits: bool,
+    pub worst_target_delta: Option<u32>,
+    pub total_foreground_pixels: u64,
+    pub total_speckle_loss: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAutoFitRun {
+    pub id: String,
+    pub extraction_id: String,
+    pub source_frame_ids: Vec<String>,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub pivot_x: u32,
+    pub pivot_y: u32,
+    pub neutral_height_target: Option<u32>,
+    pub neutral_tolerance_px: u8,
+    pub starting_pixel_size: f64,
+    pub candidates: Vec<BatchAutoFitCandidate>,
+    pub recommended_review_ids: Vec<String>,
+    pub selected_review_id: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -518,6 +617,8 @@ pub struct Animation {
     #[serde(default)]
     pub batch_snaps: Vec<BatchSnapReview>,
     #[serde(default)]
+    pub batch_auto_fit_runs: Vec<BatchAutoFitRun>,
+    #[serde(default)]
     pub active_batch_snap_id: Option<String>,
     #[serde(default)]
     pub upscaled_frames: Vec<UpscaledFrame>,
@@ -602,6 +703,19 @@ struct CleanupMetrics {
     bbox_height: u32,
     placement_x: u32,
     placement_y: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FitMetrics {
+    processor_version: String,
+    foreground_width: u32,
+    foreground_height: u32,
+    foreground_pixels: u32,
+    removed_speckle_pixels: u32,
+    placement_x: i32,
+    placement_y: i32,
+    fits: bool,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -911,6 +1025,12 @@ fn preset_settings(preset: Preset) -> (RuntimeSettings, BTreeMap<String, AnchorA
             pivot_x,
             pivot_y,
             neutral_height_target: target,
+            neutral_tolerance_px: default_neutral_tolerance(),
+            geometry_policy: if preset == Preset::KangiFight {
+                GeometryPolicy::Locked
+            } else {
+                GeometryPolicy::Flexible
+            },
             source_facings,
             mirrored_facings: mirrored,
         },
@@ -931,6 +1051,9 @@ fn read_project(dir: &Path) -> Result<Project> {
     }
     if Uuid::parse_str(&project.id).is_err() {
         return Err("Project ID is invalid".into());
+    }
+    if project.preset == Preset::KangiFight {
+        project.runtime.geometry_policy = GeometryPolicy::Locked;
     }
     if project.preset == Preset::Generic
         && project.workflow.anchor_mode == AnchorMode::BottomCenter
@@ -1298,6 +1421,7 @@ fn create_project_in(settings: &Settings, name: &str, preset: Preset) -> Result<
         anchors,
         imports: vec![],
         snap_reviews: vec![],
+        auto_fit_runs: vec![],
         cleanup_reviews: vec![],
         animations: vec![],
     };
@@ -1324,11 +1448,23 @@ fn update_workflow_in(
     if project.preset == Preset::KangiFight && workflow.anchor_mode != AnchorMode::BottomCenter {
         return Err("KangiFight anchor mode is fixed by the game contract".into());
     }
+    if project.runtime.geometry_policy == GeometryPolicy::Locked
+        && workflow.anchor_mode != project.workflow.anchor_mode
+    {
+        return Err(
+            "Runtime geometry is locked; the workflow cannot change its anchor mode".into(),
+        );
+    }
     let recenter_pivot = project.preset == Preset::Generic
         && workflow.anchor_mode == AnchorMode::BottomCenter
         && (project.runtime.pivot_x != project.runtime.cell_width / 2
             || project.runtime.pivot_y != project.runtime.cell_height.saturating_sub(1));
     if recenter_pivot {
+        if project.runtime.geometry_policy == GeometryPolicy::Locked {
+            return Err(
+                "Runtime geometry is locked; the workflow cannot recenter its pivot".into(),
+            );
+        }
         if project
             .animations
             .iter()
@@ -1389,6 +1525,7 @@ fn update_runtime_in(
     cell_height: u32,
     pivot_x: u32,
     pivot_y: u32,
+    anchor_mode: AnchorMode,
 ) -> Result<Project> {
     let (dir, mut project) = find_project(settings, project_id)?;
     if project.preset == Preset::KangiFight {
@@ -1401,10 +1538,21 @@ fn update_runtime_in(
     {
         return Err("Cell must be 16–1024 pixels and pivot must lie inside it".into());
     }
-    if project.workflow.anchor_mode == AnchorMode::BottomCenter
+    if anchor_mode == AnchorMode::BottomCenter
         && (pivot_x != cell_width / 2 || pivot_y != cell_height - 1)
     {
         return Err("Bottom-center mode requires a centered X pivot and last-row Y pivot; choose Custom for other coordinates".into());
+    }
+    if project.runtime.cell_width == cell_width
+        && project.runtime.cell_height == cell_height
+        && project.runtime.pivot_x == pivot_x
+        && project.runtime.pivot_y == pivot_y
+        && project.workflow.anchor_mode == anchor_mode
+    {
+        return Ok(project);
+    }
+    if project.runtime.geometry_policy == GeometryPolicy::Locked {
+        return Err("Runtime geometry is locked for this project; unlock the project policy before changing its cell or pivot".into());
     }
     if project
         .animations
@@ -1421,6 +1569,14 @@ fn update_runtime_in(
     project.runtime.cell_height = cell_height;
     project.runtime.pivot_x = pivot_x;
     project.runtime.pivot_y = pivot_y;
+    project.workflow.anchor_mode = anchor_mode;
+    for source in &mut project.imports {
+        for stage in ["cleanup", "normalize"] {
+            if source.stages.get(stage) != Some(&StageState::Waiting) {
+                source.stages.insert(stage.into(), StageState::Stale);
+            }
+        }
+    }
     for animation in &mut project.animations {
         animation.active_batch_cleanup_id = None;
         for stage in ["cleanup", "normalize", "align", "preview", "export"] {
@@ -1429,6 +1585,37 @@ fn update_runtime_in(
             }
         }
     }
+    project.updated_at = Utc::now();
+    atomic_json(&dir.join("project.json"), &project)?;
+    Ok(project)
+}
+
+fn update_runtime_policy_in(
+    settings: &Settings,
+    project_id: &str,
+    geometry_policy: GeometryPolicy,
+    neutral_height_target: Option<u32>,
+    neutral_tolerance_px: u8,
+) -> Result<Project> {
+    let (dir, mut project) = find_project(settings, project_id)?;
+    if neutral_tolerance_px > 32
+        || neutral_height_target
+            .is_some_and(|target| target == 0 || target > project.runtime.cell_height)
+    {
+        return Err("Neutral target must fit the cell and tolerance must be 0–32 pixels".into());
+    }
+    if project.preset == Preset::KangiFight
+        && (geometry_policy != GeometryPolicy::Locked
+            || neutral_height_target != Some(64)
+            || neutral_tolerance_px != 4)
+    {
+        return Err(
+            "This preset's locked runtime and neutral-height contract cannot be changed".into(),
+        );
+    }
+    project.runtime.geometry_policy = geometry_policy;
+    project.runtime.neutral_height_target = neutral_height_target;
+    project.runtime.neutral_tolerance_px = neutral_tolerance_px;
     project.updated_at = Utc::now();
     atomic_json(&dir.join("project.json"), &project)?;
     Ok(project)
@@ -1747,6 +1934,111 @@ fn mark_snap_stage(project: &mut Project, source_import_id: &str, stage: StageSt
     Ok(())
 }
 
+fn snapper_pixel_size(stdout: &[u8]) -> Option<f64> {
+    let text = std::str::from_utf8(stdout).ok()?;
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Pixel size: ")?
+            .split_once("px")?
+            .0
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|size| size.is_finite() && *size >= 1.0)
+    })
+}
+
+fn snap_placement(runtime: &RuntimeSettings, width: u32, height: u32) -> (i32, i32, bool) {
+    let x = runtime.pivot_x as i32 - (width / 2) as i32;
+    let y = runtime.pivot_y as i32 - height as i32 + 1;
+    let fits = width > 0
+        && height > 0
+        && x >= 0
+        && y >= 0
+        && (x as u32).saturating_add(width) <= runtime.cell_width
+        && (y as u32).saturating_add(height) <= runtime.cell_height;
+    (x, y, fits)
+}
+
+fn rank_auto_fit_candidates(run: &AutoFitRun) -> Vec<&AutoFitCandidate> {
+    let mut valid: Vec<_> = run
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.fits)
+        .collect();
+    valid.sort_by(|a, b| {
+        let target_key = |candidate: &AutoFitCandidate| {
+            run.neutral_height_target.map_or((0, 0), |target| {
+                let delta = candidate.foreground_height.abs_diff(target);
+                ((delta > run.neutral_tolerance_px as u32) as u8, delta)
+            })
+        };
+        // A configured neutral target is an art-contract preference; among
+        // equally suitable heights, keep the closest recovered grid to source.
+        target_key(a)
+            .cmp(&target_key(b))
+            .then_with(|| {
+                (a.pixel_size - run.starting_pixel_size)
+                    .abs()
+                    .total_cmp(&(b.pixel_size - run.starting_pixel_size).abs())
+            })
+            .then_with(|| b.foreground_pixels.cmp(&a.foreground_pixels))
+            .then_with(|| a.removed_speckle_pixels.cmp(&b.removed_speckle_pixels))
+            .then_with(|| a.pixel_size.total_cmp(&b.pixel_size))
+    });
+    valid
+}
+
+fn inspect_snap_fit(
+    python: &Path,
+    native_path: &Path,
+    options: &CleanupOptions,
+    background: &str,
+    runtime: &RuntimeSettings,
+    fringe_cleanup: bool,
+) -> Result<FitMetrics> {
+    let output = Command::new(python)
+        .args(["-I", "-c", CLEANUP_SCRIPT])
+        .arg(native_path)
+        .arg(native_path.with_extension("inspection-cleaned.png"))
+        .arg(native_path.with_extension("inspection-normalized.png"))
+        .arg(background)
+        .arg(options.tolerance.to_string())
+        .arg(options.min_area.to_string())
+        .arg(runtime.cell_width.to_string())
+        .arg(runtime.cell_height.to_string())
+        .arg(runtime.pivot_x.to_string())
+        .arg(runtime.pivot_y.to_string())
+        .arg(if fringe_cleanup { "1" } else { "0" })
+        .arg("--inspect-only")
+        .output()
+        .map_err(|e| format!("Auto-fit inspection could not run: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Auto-fit inspection failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+                .trim()
+                .chars()
+                .take(400)
+                .collect::<String>()
+        ));
+    }
+    let metrics: FitMetrics = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "Auto-fit inspection returned invalid metrics".to_string())?;
+    let (x, y, fits) = snap_placement(runtime, metrics.foreground_width, metrics.foreground_height);
+    if metrics.processor_version != "sprite-studio-cleanup-1"
+        || metrics.foreground_pixels == 0
+        || metrics.foreground_width > 8192
+        || metrics.foreground_height > 8192
+        || metrics.placement_x != x
+        || metrics.placement_y != y
+        || metrics.fits != fits
+    {
+        return Err("Auto-fit inspection disagrees with the fixed-cell pivot placement".into());
+    }
+    Ok(metrics)
+}
+
 fn run_snap_in(
     settings: &Settings,
     project_id: &str,
@@ -1806,6 +2098,7 @@ fn run_snap_in(
                 detail.trim().chars().take(500).collect::<String>()
             ));
         }
+        let detected_pixel_size = snapper_pixel_size(&output.stdout);
         let native_bytes = fs::read(&native_path)
             .map_err(|e| format!("Sprite Fusion CLI did not produce a native image: {e}"))?;
         if native_bytes.len() > MAX_IMPORT_BYTES as usize
@@ -1856,6 +2149,8 @@ fn run_snap_in(
             }),
             colors: options.colors,
             pixel_size: options.pixel_size,
+            detected_pixel_size,
+            auto_fit_run_id: None,
             palette,
             tool_version: version,
             created_at: Utc::now(),
@@ -1880,6 +2175,205 @@ fn run_snap_in(
     }
 }
 
+const MAX_AUTO_FIT_ATTEMPTS: usize = 16;
+const MAX_AUTO_FIT_CHOICES: usize = 3;
+
+fn run_auto_fit_in(
+    settings: &Settings,
+    project_id: &str,
+    facing: &str,
+    cleanup_options: CleanupOptions,
+) -> Result<Project> {
+    let (dir, project) = find_project(settings, project_id)?;
+    let anchor = project
+        .anchors
+        .get(facing)
+        .ok_or("This facing is not part of the project")?;
+    let source_id = anchor
+        .active_import_id
+        .clone()
+        .ok_or("Import a source anchor before auto-fit")?;
+    let active_id = anchor
+        .active_snap_id
+        .as_ref()
+        .ok_or("Apply a snapped anchor before auto-fit")?;
+    let active = project
+        .snap_reviews
+        .iter()
+        .find(|review| &review.id == active_id && review.source_import_id == source_id)
+        .ok_or("Active snapped anchor is invalid")?;
+    let source = project
+        .imports
+        .iter()
+        .find(|item| item.id == source_id)
+        .ok_or("Active source import is missing")?;
+    let original_snap_stage = source
+        .stages
+        .get("snap")
+        .cloned()
+        .unwrap_or(StageState::Complete);
+    let background = validated_cleanup_options(&cleanup_options)?;
+    let python = fs::canonicalize(
+        settings
+            .python_executable
+            .as_ref()
+            .ok_or("Locate a Python environment with Pillow and OpenCV first")?,
+    )
+    .map_err(|_| "Configured Python environment is missing; locate it again".to_string())?;
+    inspect_python(&python)?;
+    let snapper = fs::canonicalize(
+        settings
+            .snapper_executable
+            .as_ref()
+            .ok_or("Locate the Sprite Fusion CLI first")?,
+    )
+    .map_err(|_| "Configured Sprite Fusion CLI is missing; locate it again".to_string())?;
+    inspect_snapper(&snapper)?;
+    let colors = active.colors;
+    let palette = active.palette.clone();
+    let initial_override = active.pixel_size;
+    let source_limit = source.width.min(source.height);
+    let runtime = project.runtime.clone();
+    let fringe_cleanup = project.workflow.green_fringe_despeckle;
+    let run_id = Uuid::new_v4().to_string();
+    let mut run = AutoFitRun {
+        id: run_id.clone(),
+        facing: facing.into(),
+        source_import_id: source_id.clone(),
+        cell_width: runtime.cell_width,
+        cell_height: runtime.cell_height,
+        pivot_x: runtime.pivot_x,
+        pivot_y: runtime.pivot_y,
+        neutral_height_target: runtime.neutral_height_target,
+        neutral_tolerance_px: runtime.neutral_tolerance_px,
+        starting_pixel_size: 0.0,
+        candidates: vec![],
+        recommended_review_ids: vec![],
+        selected_review_id: None,
+        created_at: Utc::now(),
+    };
+    for attempt in 0..MAX_AUTO_FIT_ATTEMPTS {
+        let pixel_size = if attempt == 0 {
+            initial_override
+        } else {
+            let next = run.starting_pixel_size.floor() as u32 + attempt as u32;
+            if next > source_limit {
+                break;
+            }
+            Some(next)
+        };
+        let updated = match run_snap_in(
+            settings,
+            project_id,
+            facing,
+            SnapOptions {
+                colors,
+                pixel_size,
+                palette: palette.clone(),
+            },
+        ) {
+            Ok(project) => project,
+            Err(error) => {
+                let (dir, mut restored) = find_project(settings, project_id)?;
+                mark_snap_stage(&mut restored, &source_id, original_snap_stage)?;
+                atomic_json(&dir.join("project.json"), &restored)?;
+                return Err(error);
+            }
+        };
+        let mut updated = updated;
+        let review = updated
+            .snap_reviews
+            .last_mut()
+            .ok_or("Auto-fit snap review was not saved")?;
+        review.auto_fit_run_id = Some(run_id.clone());
+        let actual_size = review
+            .detected_pixel_size
+            .or_else(|| pixel_size.map(f64::from))
+            .unwrap_or(source.width as f64 / review.native_width as f64);
+        if attempt == 0 {
+            run.starting_pixel_size = actual_size;
+        }
+        let review_id = review.id.clone();
+        let (native_path, _) =
+            verified_asset(&dir, &review.native_relative_path, &review.native_sha256)?;
+        let metrics = match inspect_snap_fit(
+            &python,
+            &native_path,
+            &cleanup_options,
+            &background,
+            &runtime,
+            fringe_cleanup,
+        ) {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                mark_snap_stage(&mut updated, &source_id, original_snap_stage)?;
+                atomic_json(&dir.join("project.json"), &updated)?;
+                return Err(error);
+            }
+        };
+        run.candidates.push(AutoFitCandidate {
+            review_id,
+            pixel_size: actual_size,
+            foreground_width: metrics.foreground_width,
+            foreground_height: metrics.foreground_height,
+            foreground_pixels: metrics.foreground_pixels,
+            removed_speckle_pixels: metrics.removed_speckle_pixels,
+            fits: metrics.fits,
+        });
+        if let Some(existing) = updated
+            .auto_fit_runs
+            .iter_mut()
+            .find(|item| item.id == run_id)
+        {
+            *existing = run.clone();
+        } else {
+            updated.auto_fit_runs.push(run.clone());
+        }
+        mark_snap_stage(&mut updated, &source_id, original_snap_stage.clone())?;
+        atomic_json(&dir.join("project.json"), &updated)?;
+        let valid_count = run.candidates.iter().filter(|item| item.fits).count();
+        let on_target_count = run
+            .candidates
+            .iter()
+            .filter(|item| {
+                item.fits
+                    && runtime.neutral_height_target.is_some_and(|target| {
+                        item.foreground_height.abs_diff(target)
+                            <= runtime.neutral_tolerance_px as u32
+                    })
+            })
+            .count();
+        if valid_count >= MAX_AUTO_FIT_CHOICES
+            && (runtime.neutral_height_target.is_none() || on_target_count >= MAX_AUTO_FIT_CHOICES)
+        {
+            break;
+        }
+    }
+    let mut finished = find_project(settings, project_id)?.1;
+    let ranked = rank_auto_fit_candidates(&run);
+    run.recommended_review_ids = ranked
+        .iter()
+        .take(MAX_AUTO_FIT_CHOICES)
+        .map(|candidate| candidate.review_id.clone())
+        .collect();
+    run.selected_review_id = run.recommended_review_ids.first().cloned();
+    let saved = finished
+        .auto_fit_runs
+        .iter_mut()
+        .find(|item| item.id == run_id)
+        .ok_or("Auto-fit run was not saved")?;
+    let found = run.selected_review_id.is_some();
+    *saved = run;
+    atomic_json(&dir.join("project.json"), &finished)?;
+    if !found {
+        return Err(format!(
+            "No lossless snap candidate fits the locked {}×{} cell at pivot ({},{}). Try a different source generation or manually choose a coarser pixel size.",
+            runtime.cell_width, runtime.cell_height, runtime.pivot_x, runtime.pivot_y
+        ));
+    }
+    Ok(finished)
+}
+
 fn apply_snap_in(settings: &Settings, project_id: &str, review_id: &str) -> Result<Project> {
     let (dir, mut project) = find_project(settings, project_id)?;
     let review = project
@@ -1894,6 +2388,28 @@ fn apply_snap_in(settings: &Settings, project_id: &str, review_id: &str) -> Resu
         .ok_or("Facing is missing")?;
     if anchor.active_import_id.as_ref() != Some(&review.source_import_id) {
         return Err("This review belongs to an older source import; run snap again".into());
+    }
+    if let Some(run_id) = &review.auto_fit_run_id {
+        let run = project
+            .auto_fit_runs
+            .iter()
+            .find(|item| &item.id == run_id)
+            .ok_or("Auto-fit review metadata is missing")?;
+        let candidate = run
+            .candidates
+            .iter()
+            .find(|item| item.review_id == review.id)
+            .ok_or("Auto-fit candidate metrics are missing")?;
+        if !candidate.fits
+            || run.cell_width != project.runtime.cell_width
+            || run.cell_height != project.runtime.cell_height
+            || run.pivot_x != project.runtime.pivot_x
+            || run.pivot_y != project.runtime.pivot_y
+        {
+            return Err(
+                "This auto-fit candidate does not fit the current runtime cell and pivot".into(),
+            );
+        }
     }
     verified_asset(&dir, &review.native_relative_path, &review.native_sha256)?;
     verified_asset(
@@ -1986,6 +2502,11 @@ fn run_cleanup_in(
             .arg(runtime.cell_height.to_string())
             .arg(runtime.pivot_x.to_string())
             .arg(runtime.pivot_y.to_string())
+            .arg(if project.workflow.green_fringe_despeckle {
+                "1"
+            } else {
+                "0"
+            })
             .output()
             .map_err(|e| format!("Cleanup processor could not run: {e}"))?;
         if !output.status.success() {
@@ -2084,6 +2605,29 @@ fn apply_cleanup_in(settings: &Settings, project_id: &str, review_id: &str) -> R
         || anchor.active_snap_id.as_ref() != Some(&review.source_snap_id)
     {
         return Err("This cleanup belongs to an older snapped input; run cleanup again".into());
+    }
+    let source = project
+        .imports
+        .iter()
+        .find(|item| item.id == review.source_import_id)
+        .ok_or("Cleanup source import is missing")?;
+    if source.stages.get("cleanup") != Some(&StageState::Review)
+        || review.normalized_width != project.runtime.cell_width
+        || review.normalized_height != project.runtime.cell_height
+    {
+        return Err("Runtime geometry changed after this cleanup review; run cleanup again".into());
+    }
+    if project
+        .cleanup_reviews
+        .iter()
+        .rev()
+        .find(|item| {
+            item.source_import_id == review.source_import_id
+                && item.source_snap_id == review.source_snap_id
+        })
+        .is_none_or(|item| item.id != review.id)
+    {
+        return Err("A newer cleanup review superseded this one; apply the latest result".into());
     }
     verified_asset(&dir, &review.cleaned_relative_path, &review.cleaned_sha256)?;
     verified_asset(
@@ -2390,6 +2934,7 @@ fn create_animation_in(
         raw_frames: vec![],
         active_raw_frame_ids: vec![],
         batch_snaps: vec![],
+        batch_auto_fit_runs: vec![],
         active_batch_snap_id: None,
         upscaled_frames: vec![],
         active_upscaled_frame_ids: BTreeMap::new(),
@@ -3010,6 +3555,7 @@ fn run_batch_snap_in(
     atomic_json(&dir.join("project.json"), &project)?;
     let result = (|| -> Result<BatchSnapReview> {
         let mut frames = Vec::with_capacity(sources.len());
+        let mut detected_pixel_size = None;
         for (index, source) in sources.iter().enumerate() {
             let output_relative = format!("{relative_dir}/frame_{:03}-native.png", index + 1);
             let output_path = dir.join(&output_relative);
@@ -3038,6 +3584,9 @@ fn run_batch_snap_in(
                         .collect::<String>()
                 ));
             }
+            if detected_pixel_size.is_none() {
+                detected_pixel_size = snapper_pixel_size(&output.stdout);
+            }
             let bytes = fs::read(&output_path)
                 .map_err(|e| format!("Frame {} snap output missing: {e}", index + 1))?;
             if bytes.len() > MAX_IMPORT_BYTES as usize
@@ -3056,12 +3605,6 @@ fn run_batch_snap_in(
                 || image.height() > 2048
             {
                 return Err(format!("Frame {} recovered grid is too large", index + 1));
-            }
-            if project.preset == Preset::KangiFight {
-                let target = project.runtime.neutral_height_target.unwrap_or(64);
-                if image.height() > target + 4 || image.width() > project.runtime.cell_width {
-                    return Err(format!("Frame {} snapped to {}×{}, above the KangiFight {}px neutral-height target. Re-run Snap all with pixel size {} or larger; normalized art is never scaled", index + 1, image.width(), image.height(), target, effective_pixel_size.unwrap_or(1).saturating_add(1)));
-                }
             }
             frames.push(BatchFrameArtifact {
                 source_frame_id: source.id.clone(),
@@ -3087,6 +3630,8 @@ fn run_batch_snap_in(
             frames,
             colors: options.colors,
             pixel_size: effective_pixel_size,
+            detected_pixel_size,
+            auto_fit_run_id: None,
             palette,
             tool_version: version,
             created_at: Utc::now(),
@@ -3114,6 +3659,288 @@ fn run_batch_snap_in(
     project.updated_at = animation.updated_at;
     atomic_json(&dir.join("project.json"), &project)?;
     Ok(project)
+}
+
+fn rank_batch_auto_fit_candidates(run: &BatchAutoFitRun) -> Vec<&BatchAutoFitCandidate> {
+    let mut valid: Vec<_> = run
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.fits)
+        .collect();
+    valid.sort_by(|a, b| {
+        let target_key = |candidate: &BatchAutoFitCandidate| {
+            candidate.worst_target_delta.map_or((0, 0), |delta| {
+                ((delta > run.neutral_tolerance_px as u32) as u8, delta)
+            })
+        };
+        target_key(a)
+            .cmp(&target_key(b))
+            .then_with(|| {
+                (a.pixel_size - run.starting_pixel_size)
+                    .abs()
+                    .total_cmp(&(b.pixel_size - run.starting_pixel_size).abs())
+            })
+            .then_with(|| b.total_foreground_pixels.cmp(&a.total_foreground_pixels))
+            .then_with(|| a.total_speckle_loss.cmp(&b.total_speckle_loss))
+            .then_with(|| a.pixel_size.total_cmp(&b.pixel_size))
+    });
+    valid
+}
+
+fn run_batch_auto_fit_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    cleanup_options: CleanupOptions,
+) -> Result<Project> {
+    let (dir, project) = find_project(settings, project_id)?;
+    if project.workflow.upscale_mode != UpscaleMode::Automatic {
+        return Err("Auto-fit uses native snapped frames; switch from manual upscale or revise the upscaled inputs".into());
+    }
+    let animation = project
+        .animations
+        .iter()
+        .find(|item| item.id == animation_id)
+        .ok_or("Animation not found")?;
+    let active_id = animation
+        .active_batch_snap_id
+        .as_ref()
+        .ok_or("Apply a batch snap before auto-fit")?;
+    let active = animation
+        .batch_snaps
+        .iter()
+        .find(|review| &review.id == active_id)
+        .ok_or("Active batch snap is invalid")?;
+    let extraction_id = animation
+        .active_extraction_id
+        .clone()
+        .ok_or("Apply frame recovery before auto-fit")?;
+    let source_ids = animation.active_raw_frame_ids.clone();
+    let source_limit = source_ids
+        .iter()
+        .filter_map(|id| animation.raw_frames.iter().find(|frame| &frame.id == id))
+        .map(|frame| frame.width.min(frame.height))
+        .min()
+        .ok_or("No raw frames are active")?;
+    let original_stage = animation
+        .stages
+        .get("snap")
+        .cloned()
+        .unwrap_or(StageState::Complete);
+    let background = validated_cleanup_options(&cleanup_options)?;
+    let python = fs::canonicalize(
+        settings
+            .python_executable
+            .as_ref()
+            .ok_or("Locate a Python environment with Pillow and OpenCV first")?,
+    )
+    .map_err(|_| "Configured Python environment is missing; locate it again".to_string())?;
+    inspect_python(&python)?;
+    let snapper = fs::canonicalize(
+        settings
+            .snapper_executable
+            .as_ref()
+            .ok_or("Locate the Sprite Fusion CLI first")?,
+    )
+    .map_err(|_| "Configured Sprite Fusion CLI is missing; locate it again".to_string())?;
+    inspect_snapper(&snapper)?;
+    let runtime = project.runtime.clone();
+    let fringe_cleanup = project.workflow.green_fringe_despeckle;
+    let colors = active.colors;
+    let palette = active.palette.clone();
+    let initial_override = active.pixel_size;
+    let run_id = Uuid::new_v4().to_string();
+    let mut run = BatchAutoFitRun {
+        id: run_id.clone(),
+        extraction_id,
+        source_frame_ids: source_ids,
+        cell_width: runtime.cell_width,
+        cell_height: runtime.cell_height,
+        pivot_x: runtime.pivot_x,
+        pivot_y: runtime.pivot_y,
+        neutral_height_target: runtime.neutral_height_target,
+        neutral_tolerance_px: runtime.neutral_tolerance_px,
+        starting_pixel_size: 0.0,
+        candidates: vec![],
+        recommended_review_ids: vec![],
+        selected_review_id: None,
+        created_at: Utc::now(),
+    };
+    for attempt in 0..MAX_AUTO_FIT_ATTEMPTS {
+        let pixel_size = if attempt == 0 {
+            initial_override
+        } else {
+            let next = run.starting_pixel_size.floor() as u32 + attempt as u32;
+            if next > source_limit {
+                break;
+            }
+            Some(next)
+        };
+        let updated = match run_batch_snap_in(
+            settings,
+            project_id,
+            animation_id,
+            SnapOptions {
+                colors,
+                pixel_size,
+                palette: palette.clone(),
+            },
+        ) {
+            Ok(project) => project,
+            Err(error) => {
+                let (dir, mut restored) = find_project(settings, project_id)?;
+                if let Some(animation) = restored
+                    .animations
+                    .iter_mut()
+                    .find(|item| item.id == animation_id)
+                {
+                    animation
+                        .stages
+                        .insert("snap".into(), original_stage.clone());
+                }
+                atomic_json(&dir.join("project.json"), &restored)?;
+                return Err(error);
+            }
+        };
+        let mut updated = updated;
+        let review = updated
+            .animations
+            .iter_mut()
+            .find(|item| item.id == animation_id)
+            .unwrap()
+            .batch_snaps
+            .last_mut()
+            .ok_or("Batch auto-fit snap review was not saved")?;
+        review.auto_fit_run_id = Some(run_id.clone());
+        let actual_size = review
+            .detected_pixel_size
+            .or_else(|| pixel_size.map(f64::from))
+            .unwrap_or(
+                source_limit as f64 / review.frames[0].width.min(review.frames[0].height) as f64,
+            );
+        if attempt == 0 {
+            run.starting_pixel_size = actual_size;
+        }
+        let review_id = review.id.clone();
+        let frame_artifacts = review.frames.clone();
+        let mut frames = Vec::with_capacity(frame_artifacts.len());
+        for frame in &frame_artifacts {
+            let (native_path, _) = verified_asset(&dir, &frame.relative_path, &frame.sha256)?;
+            let metrics = match inspect_snap_fit(
+                &python,
+                &native_path,
+                &cleanup_options,
+                &background,
+                &runtime,
+                fringe_cleanup,
+            ) {
+                Ok(metrics) => metrics,
+                Err(error) => {
+                    updated
+                        .animations
+                        .iter_mut()
+                        .find(|item| item.id == animation_id)
+                        .unwrap()
+                        .stages
+                        .insert("snap".into(), original_stage.clone());
+                    atomic_json(&dir.join("project.json"), &updated)?;
+                    return Err(error);
+                }
+            };
+            frames.push(BatchAutoFitFrame {
+                source_frame_id: frame.source_frame_id.clone(),
+                foreground_width: metrics.foreground_width,
+                foreground_height: metrics.foreground_height,
+                foreground_pixels: metrics.foreground_pixels,
+                removed_speckle_pixels: metrics.removed_speckle_pixels,
+                fits: metrics.fits,
+            });
+        }
+        let candidate = BatchAutoFitCandidate {
+            review_id,
+            pixel_size: actual_size,
+            fits: frames.iter().all(|frame| frame.fits),
+            worst_target_delta: runtime.neutral_height_target.map(|target| {
+                frames
+                    .iter()
+                    .map(|frame| frame.foreground_height.abs_diff(target))
+                    .max()
+                    .unwrap_or(0)
+            }),
+            total_foreground_pixels: frames
+                .iter()
+                .map(|frame| frame.foreground_pixels as u64)
+                .sum(),
+            total_speckle_loss: frames
+                .iter()
+                .map(|frame| frame.removed_speckle_pixels as u64)
+                .sum(),
+            frames,
+        };
+        run.candidates.push(candidate);
+        let animation = updated
+            .animations
+            .iter_mut()
+            .find(|item| item.id == animation_id)
+            .unwrap();
+        if let Some(existing) = animation
+            .batch_auto_fit_runs
+            .iter_mut()
+            .find(|item| item.id == run_id)
+        {
+            *existing = run.clone();
+        } else {
+            animation.batch_auto_fit_runs.push(run.clone());
+        }
+        animation
+            .stages
+            .insert("snap".into(), original_stage.clone());
+        atomic_json(&dir.join("project.json"), &updated)?;
+        let valid_count = run.candidates.iter().filter(|item| item.fits).count();
+        let on_target_count = run
+            .candidates
+            .iter()
+            .filter(|item| {
+                item.fits
+                    && item
+                        .worst_target_delta
+                        .is_some_and(|delta| delta <= runtime.neutral_tolerance_px as u32)
+            })
+            .count();
+        if valid_count >= MAX_AUTO_FIT_CHOICES
+            && (runtime.neutral_height_target.is_none() || on_target_count >= MAX_AUTO_FIT_CHOICES)
+        {
+            break;
+        }
+    }
+    let mut finished = find_project(settings, project_id)?.1;
+    let ranked = rank_batch_auto_fit_candidates(&run);
+    run.recommended_review_ids = ranked
+        .iter()
+        .take(MAX_AUTO_FIT_CHOICES)
+        .map(|item| item.review_id.clone())
+        .collect();
+    run.selected_review_id = run.recommended_review_ids.first().cloned();
+    let found = run.selected_review_id.is_some();
+    let animation = finished
+        .animations
+        .iter_mut()
+        .find(|item| item.id == animation_id)
+        .unwrap();
+    let saved = animation
+        .batch_auto_fit_runs
+        .iter_mut()
+        .find(|item| item.id == run_id)
+        .ok_or("Batch auto-fit run was not saved")?;
+    *saved = run;
+    atomic_json(&dir.join("project.json"), &finished)?;
+    if !found {
+        return Err(format!(
+            "No lossless snap candidate fits the locked {}×{} cell at pivot ({},{}). Try a different source generation or manually choose a coarser pixel size.",
+            runtime.cell_width, runtime.cell_height, runtime.pivot_x, runtime.pivot_y
+        ));
+    }
+    Ok(finished)
 }
 
 fn confirm_native_review_in(
@@ -3337,6 +4164,29 @@ fn apply_batch_snap_in(
         || animation.active_raw_frame_ids != review.source_frame_ids
     {
         return Err("Raw frames have changed; snap again".into());
+    }
+    if let Some(run_id) = &review.auto_fit_run_id {
+        let run = animation
+            .batch_auto_fit_runs
+            .iter()
+            .find(|item| &item.id == run_id)
+            .ok_or("Batch auto-fit review metadata is missing")?;
+        let candidate = run
+            .candidates
+            .iter()
+            .find(|item| item.review_id == review.id)
+            .ok_or("Batch auto-fit candidate metrics are missing")?;
+        if !candidate.fits
+            || run.cell_width != project.runtime.cell_width
+            || run.cell_height != project.runtime.cell_height
+            || run.pivot_x != project.runtime.pivot_x
+            || run.pivot_y != project.runtime.pivot_y
+            || run.source_frame_ids != animation.active_raw_frame_ids
+        {
+            return Err(
+                "This batch auto-fit candidate does not fit the current runtime contract".into(),
+            );
+        }
     }
     for frame in &review.frames {
         verified_asset(&dir, &frame.relative_path, &frame.sha256)?;
@@ -3718,29 +4568,6 @@ fn run_batch_cleanup_in(
                 frame.height,
                 None,
             ));
-        }
-    }
-    if project.preset == Preset::KangiFight {
-        let target = project.runtime.neutral_height_target.unwrap_or(64);
-        if let Some((index, frame)) = inputs
-            .iter()
-            .enumerate()
-            .find(|(_, frame)| frame.4 > target + 4 || frame.3 > project.runtime.cell_width)
-        {
-            let max_raw_height = animation
-                .active_raw_frame_ids
-                .iter()
-                .filter_map(|id| {
-                    animation
-                        .raw_frames
-                        .iter()
-                        .find(|item| &item.id == id)
-                        .map(|item| item.height)
-                })
-                .max()
-                .unwrap_or(0);
-            let suggested = max_raw_height.div_ceil(target) + 1;
-            return Err(format!("Frame {} is {}×{} and exceeds KangiFight's {}px neutral-height target. Revise the input or pixel grid; cleanup never rescales art (suggested grid {}px)", index + 1, frame.3, frame.4, target, suggested));
         }
     }
     let background = validated_cleanup_options(&options)?;
@@ -5099,6 +5926,26 @@ pub async fn run_snap(
 }
 
 #[tauri::command]
+pub async fn run_auto_fit(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    facing: String,
+    cleanup_options: CleanupOptions,
+) -> Result<Project> {
+    let lock = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock
+            .lock()
+            .map_err(|_| "Project operation lock is unavailable")?;
+        let settings = read_settings(&settings_file(&app)?)?;
+        run_auto_fit_in(&settings, &project_id, &facing, cleanup_options)
+    })
+    .await
+    .map_err(|e| format!("Auto-fit task did not complete: {e}"))?
+}
+
+#[tauri::command]
 pub fn apply_snap(
     app: tauri::AppHandle,
     state: tauri::State<'_, StudioLock>,
@@ -5466,6 +6313,26 @@ pub async fn run_batch_snap(
 }
 
 #[tauri::command]
+pub async fn run_batch_auto_fit(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    animation_id: String,
+    cleanup_options: CleanupOptions,
+) -> Result<Project> {
+    let lock = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock
+            .lock()
+            .map_err(|_| "Project operation lock is unavailable")?;
+        let settings = read_settings(&settings_file(&app)?)?;
+        run_batch_auto_fit_in(&settings, &project_id, &animation_id, cleanup_options)
+    })
+    .await
+    .map_err(|e| format!("Batch auto-fit task did not complete: {e}"))?
+}
+
+#[tauri::command]
 pub fn apply_batch_snap(
     app: tauri::AppHandle,
     state: tauri::State<'_, StudioLock>,
@@ -5577,6 +6444,7 @@ pub fn update_runtime(
     cell_height: u32,
     pivot_x: u32,
     pivot_y: u32,
+    anchor_mode: AnchorMode,
 ) -> Result<Project> {
     let _guard = state
         .0
@@ -5590,6 +6458,30 @@ pub fn update_runtime(
         cell_height,
         pivot_x,
         pivot_y,
+        anchor_mode,
+    )
+}
+
+#[tauri::command]
+pub fn update_runtime_policy(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    geometry_policy: GeometryPolicy,
+    neutral_height_target: Option<u32>,
+    neutral_tolerance_px: u8,
+) -> Result<Project> {
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "Project operation lock is unavailable")?;
+    let settings = read_settings(&settings_file(&app)?)?;
+    update_runtime_policy_in(
+        &settings,
+        &project_id,
+        geometry_policy,
+        neutral_height_target,
+        neutral_tolerance_px,
     )
 }
 
@@ -5878,6 +6770,338 @@ mod tests {
     }
 
     #[test]
+    fn snap_fit_rejects_pivot_and_one_pixel_overflow() {
+        let (mut runtime, _) = preset_settings(Preset::Generic);
+        runtime.cell_width = 128;
+        runtime.cell_height = 128;
+        runtime.pivot_x = 64;
+        runtime.pivot_y = 112;
+        assert_eq!(snap_placement(&runtime, 100, 126), (14, -13, false));
+        assert!(!snap_placement(&runtime, 129, 70).2);
+        assert!(!snap_placement(&runtime, 80, 114).2);
+        assert!(snap_placement(&runtime, 80, 113).2);
+    }
+
+    #[test]
+    fn installed_auto_fit_preserves_active_snap_until_apply_and_is_deterministic() {
+        let (Ok(snapper), Ok(python)) = (
+            std::env::var("SPRITE_STUDIO_TEST_SNAPPER"),
+            std::env::var("SPRITE_STUDIO_TEST_PYTHON"),
+        ) else {
+            return;
+        };
+        let tmp = tempdir().unwrap();
+        let base = test_settings(tmp.path());
+        let settings_path = tmp.path().join("app-settings.json");
+        atomic_json(&settings_path, &base).unwrap();
+        configure_snapper_in(&settings_path, &snapper).unwrap();
+        let settings = configure_python_in(&settings_path, &python).unwrap();
+        let project = create_project_in(&settings, "Auto-fit Fox", Preset::Generic).unwrap();
+        update_runtime_in(
+            &settings,
+            &project.id,
+            128,
+            128,
+            64,
+            112,
+            AnchorMode::Custom,
+        )
+        .unwrap();
+        update_runtime_policy_in(&settings, &project.id, GeometryPolicy::Locked, Some(64), 4)
+            .unwrap();
+        let source = tmp.path().join("source.png");
+        snap_sample_png(&source);
+        let imported =
+            import_into(&settings, &project.id, "east", source.to_str().unwrap()).unwrap();
+        let original_hash = imported.imports[0].sha256.clone();
+        let first = run_snap_in(
+            &settings,
+            &project.id,
+            "east",
+            SnapOptions {
+                colors: 16,
+                pixel_size: Some(1),
+                palette: None,
+            },
+        )
+        .unwrap();
+        let active_id = first.snap_reviews.last().unwrap().id.clone();
+        apply_snap_in(&settings, &project.id, &active_id).unwrap();
+        let cleanup_options = CleanupOptions {
+            background: "auto".into(),
+            tolerance: 18,
+            min_area: 2,
+        };
+        assert!(run_cleanup_in(&settings, &project.id, "east", cleanup_options.clone()).is_err());
+        let fitted =
+            run_auto_fit_in(&settings, &project.id, "east", cleanup_options.clone()).unwrap();
+        let run = fitted.auto_fit_runs.last().unwrap();
+        assert!(!run.candidates[0].fits);
+        assert!(run.candidates[1].fits, "the first coarser grid should fit");
+        let selected_id = run.selected_review_id.as_ref().unwrap();
+        let chosen = run
+            .candidates
+            .iter()
+            .find(|item| &item.review_id == selected_id)
+            .unwrap();
+        assert!(chosen.fits);
+        assert!(chosen.pixel_size > run.starting_pixel_size);
+        assert!(
+            snap_placement(
+                &fitted.runtime,
+                chosen.foreground_width,
+                chosen.foreground_height
+            )
+            .2
+        );
+        assert_eq!(
+            fitted.anchors["east"].active_snap_id.as_deref(),
+            Some(active_id.as_str())
+        );
+        assert_eq!(fitted.imports[0].sha256, original_hash);
+        assert!(fitted
+            .snap_reviews
+            .iter()
+            .all(|item| item.id == active_id || item.applied_at.is_none()));
+        let selected_review = fitted
+            .snap_reviews
+            .iter()
+            .find(|item| &item.id == selected_id)
+            .unwrap();
+        let selected_hash = selected_review.native_sha256.clone();
+        assert!(selected_review.native_width < first.snap_reviews[0].native_width);
+        let second =
+            run_auto_fit_in(&settings, &project.id, "east", cleanup_options.clone()).unwrap();
+        let second_id = second
+            .auto_fit_runs
+            .last()
+            .unwrap()
+            .selected_review_id
+            .as_ref()
+            .unwrap();
+        let second_review = second
+            .snap_reviews
+            .iter()
+            .find(|item| &item.id == second_id)
+            .unwrap();
+        assert_eq!(second_review.native_sha256, selected_hash);
+        assert_eq!(
+            second
+                .auto_fit_runs
+                .last()
+                .unwrap()
+                .candidates
+                .iter()
+                .find(|item| &item.review_id == second_id)
+                .unwrap()
+                .pixel_size,
+            chosen.pixel_size
+        );
+        assert_eq!(
+            second.anchors["east"].active_snap_id.as_deref(),
+            Some(active_id.as_str())
+        );
+        let applied = apply_snap_in(&settings, &project.id, selected_id).unwrap();
+        assert_eq!(
+            applied.anchors["east"].active_snap_id.as_deref(),
+            Some(selected_id.as_str())
+        );
+        assert_eq!(applied.imports[0].sha256, original_hash);
+        assert_eq!(
+            (
+                applied.runtime.cell_width,
+                applied.runtime.cell_height,
+                applied.runtime.pivot_x,
+                applied.runtime.pivot_y
+            ),
+            (128, 128, 64, 112)
+        );
+        let cleaned = run_cleanup_in(&settings, &project.id, "east", cleanup_options).unwrap();
+        let review = cleaned.cleanup_reviews.last().unwrap();
+        assert_eq!(
+            (review.cleaned_width, review.cleaned_height),
+            (chosen.foreground_width, chosen.foreground_height)
+        );
+        assert_eq!(
+            (review.normalized_width, review.normalized_height),
+            (128, 128)
+        );
+    }
+
+    #[test]
+    fn installed_auto_fit_no_candidate_keeps_locked_contract_and_prior_review() {
+        let (Ok(snapper), Ok(python)) = (
+            std::env::var("SPRITE_STUDIO_TEST_SNAPPER"),
+            std::env::var("SPRITE_STUDIO_TEST_PYTHON"),
+        ) else {
+            return;
+        };
+        let tmp = tempdir().unwrap();
+        let base = test_settings(tmp.path());
+        let settings_path = tmp.path().join("app-settings.json");
+        atomic_json(&settings_path, &base).unwrap();
+        configure_snapper_in(&settings_path, &snapper).unwrap();
+        let settings = configure_python_in(&settings_path, &python).unwrap();
+        let project = create_project_in(&settings, "Impossible Fox", Preset::Generic).unwrap();
+        update_runtime_in(&settings, &project.id, 32, 32, 16, 0, AnchorMode::Custom).unwrap();
+        update_runtime_policy_in(&settings, &project.id, GeometryPolicy::Locked, None, 4).unwrap();
+        let source = tmp.path().join("source.png");
+        snap_sample_png(&source);
+        let imported =
+            import_into(&settings, &project.id, "east", source.to_str().unwrap()).unwrap();
+        let first = run_snap_in(
+            &settings,
+            &project.id,
+            "east",
+            SnapOptions {
+                colors: 16,
+                pixel_size: Some(1),
+                palette: None,
+            },
+        )
+        .unwrap();
+        let active_id = first.snap_reviews.last().unwrap().id.clone();
+        apply_snap_in(&settings, &project.id, &active_id).unwrap();
+        let result = run_auto_fit_in(
+            &settings,
+            &project.id,
+            "east",
+            CleanupOptions {
+                background: "auto".into(),
+                tolerance: 18,
+                min_area: 2,
+            },
+        );
+        let error = match result {
+            Ok(_) => panic!("Expected no fitting candidate"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("No lossless snap candidate fits the locked 32×32 cell at pivot (16,0)")
+        );
+        let persisted = find_project(&settings, &project.id).unwrap().1;
+        assert_eq!(
+            persisted.anchors["east"].active_snap_id.as_deref(),
+            Some(active_id.as_str())
+        );
+        assert_eq!(persisted.imports[0].sha256, imported.imports[0].sha256);
+        assert_eq!(
+            (
+                persisted.runtime.cell_width,
+                persisted.runtime.cell_height,
+                persisted.runtime.pivot_x,
+                persisted.runtime.pivot_y
+            ),
+            (32, 32, 16, 0)
+        );
+        assert_eq!(persisted.runtime.geometry_policy, GeometryPolicy::Locked);
+        assert!(persisted
+            .auto_fit_runs
+            .last()
+            .unwrap()
+            .selected_review_id
+            .is_none());
+        assert!(persisted
+            .auto_fit_runs
+            .last()
+            .unwrap()
+            .candidates
+            .iter()
+            .all(|item| !item.fits));
+        assert!(persisted.snap_reviews.len() > 1);
+    }
+
+    #[test]
+    fn auto_fit_ranking_respects_neutral_target_then_source_detail() {
+        let mut run = AutoFitRun {
+            id: "test".into(),
+            facing: "east".into(),
+            source_import_id: "source".into(),
+            cell_width: 128,
+            cell_height: 128,
+            pivot_x: 64,
+            pivot_y: 112,
+            neutral_height_target: Some(64),
+            neutral_tolerance_px: 4,
+            starting_pixel_size: 8.0,
+            candidates: vec![],
+            recommended_review_ids: vec![],
+            selected_review_id: None,
+            created_at: Utc::now(),
+        };
+        let candidate =
+            |id: &str, size: f64, height: u32, detail: u32, loss: u32| AutoFitCandidate {
+                review_id: id.into(),
+                pixel_size: size,
+                foreground_width: 60,
+                foreground_height: height,
+                foreground_pixels: detail,
+                removed_speckle_pixels: loss,
+                fits: true,
+            };
+        run.candidates = vec![
+            candidate("near-source", 9.0, 90, 700, 0),
+            candidate("near-target", 13.0, 65, 600, 1),
+            candidate("exact-target", 14.0, 64, 590, 1),
+            candidate("less-detail", 14.0, 64, 580, 2),
+        ];
+        assert_eq!(rank_auto_fit_candidates(&run)[0].review_id, "exact-target");
+        run.neutral_height_target = None;
+        assert_eq!(rank_auto_fit_candidates(&run)[0].review_id, "near-source");
+    }
+
+    #[test]
+    fn locked_geometry_rejects_mutation_but_flexible_geometry_allows_it() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "Policy Fox", Preset::Generic).unwrap();
+        let locked =
+            update_runtime_policy_in(&settings, &project.id, GeometryPolicy::Locked, Some(64), 4)
+                .unwrap();
+        assert_eq!(locked.runtime.geometry_policy, GeometryPolicy::Locked);
+        let mut altered_workflow = locked.workflow.clone();
+        altered_workflow.anchor_mode = AnchorMode::Custom;
+        assert!(update_workflow_in(&settings, &project.id, altered_workflow).is_err());
+        assert!(update_runtime_in(
+            &settings,
+            &project.id,
+            272,
+            272,
+            136,
+            271,
+            AnchorMode::BottomCenter,
+        )
+        .is_err());
+        assert_eq!(
+            find_project(&settings, &project.id)
+                .unwrap()
+                .1
+                .runtime
+                .cell_width,
+            256
+        );
+        update_runtime_policy_in(
+            &settings,
+            &project.id,
+            GeometryPolicy::Flexible,
+            Some(64),
+            4,
+        )
+        .unwrap();
+        let resized = update_runtime_in(
+            &settings,
+            &project.id,
+            272,
+            272,
+            136,
+            271,
+            AnchorMode::BottomCenter,
+        )
+        .unwrap();
+        assert_eq!(resized.runtime.cell_width, 272);
+    }
+
+    #[test]
     fn presets_and_reimports_preserve_bytes() {
         let tmp = tempdir().unwrap();
         let settings = test_settings(tmp.path());
@@ -5925,6 +7149,91 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn runtime_pivot_and_anchor_mode_save_together() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "Pivot Fox", Preset::Generic).unwrap();
+
+        let custom = update_runtime_in(
+            &settings,
+            &project.id,
+            256,
+            256,
+            120,
+            230,
+            AnchorMode::Custom,
+        )
+        .unwrap();
+        assert_eq!((custom.runtime.pivot_x, custom.runtime.pivot_y), (120, 230));
+        assert_eq!(custom.workflow.anchor_mode, AnchorMode::Custom);
+        assert_eq!(
+            find_project(&settings, &project.id)
+                .unwrap()
+                .1
+                .workflow
+                .anchor_mode,
+            AnchorMode::Custom
+        );
+
+        assert!(update_runtime_in(
+            &settings,
+            &project.id,
+            256,
+            256,
+            120,
+            230,
+            AnchorMode::BottomCenter,
+        )
+        .is_err());
+        let unchanged = find_project(&settings, &project.id).unwrap().1;
+        assert_eq!(
+            (unchanged.runtime.pivot_x, unchanged.runtime.pivot_y),
+            (120, 230)
+        );
+        assert_eq!(unchanged.workflow.anchor_mode, AnchorMode::Custom);
+
+        let centered = update_runtime_in(
+            &settings,
+            &project.id,
+            256,
+            256,
+            128,
+            255,
+            AnchorMode::BottomCenter,
+        )
+        .unwrap();
+        assert_eq!(centered.workflow.anchor_mode, AnchorMode::BottomCenter);
+        assert_eq!(
+            (centered.runtime.pivot_x, centered.runtime.pivot_y),
+            (128, 255)
+        );
+
+        let source = tmp.path().join("pivot-source.png");
+        sample_png(&source);
+        import_into(&settings, &project.id, "north", source.to_str().unwrap()).unwrap();
+        let (dir, mut pending) = find_project(&settings, &project.id).unwrap();
+        pending.imports[0]
+            .stages
+            .insert("cleanup".into(), StageState::Review);
+        pending.imports[0]
+            .stages
+            .insert("normalize".into(), StageState::Review);
+        atomic_json(&dir.join("project.json"), &pending).unwrap();
+        let resized = update_runtime_in(
+            &settings,
+            &project.id,
+            272,
+            272,
+            136,
+            271,
+            AnchorMode::BottomCenter,
+        )
+        .unwrap();
+        assert_eq!(resized.imports[0].stages["cleanup"], StageState::Stale);
+        assert_eq!(resized.imports[0].stages["normalize"], StageState::Stale);
     }
 
     #[test]
@@ -5994,6 +7303,8 @@ mod tests {
             outputs: None,
             colors: 16,
             pixel_size: None,
+            detected_pixel_size: None,
+            auto_fit_run_id: None,
             palette: None,
             tool_version: "test".into(),
             created_at: Utc::now(),
@@ -6866,6 +8177,147 @@ mod tests {
     }
 
     #[test]
+    fn installed_batch_auto_fit_preserves_applied_frames_until_review_apply() {
+        let (Ok(python), Ok(snapper)) = (
+            std::env::var("SPRITE_STUDIO_TEST_PYTHON"),
+            std::env::var("SPRITE_STUDIO_TEST_SNAPPER"),
+        ) else {
+            return;
+        };
+        let tmp = tempdir().unwrap();
+        let base = test_settings(tmp.path());
+        let settings_path = tmp.path().join("app-settings.json");
+        atomic_json(&settings_path, &base).unwrap();
+        configure_python_in(&settings_path, &python).unwrap();
+        let settings = configure_snapper_in(&settings_path, &snapper).unwrap();
+        let project = create_project_in(&settings, "Batch Fit", Preset::Generic).unwrap();
+        update_runtime_in(
+            &settings,
+            &project.id,
+            128,
+            128,
+            64,
+            112,
+            AnchorMode::Custom,
+        )
+        .unwrap();
+        update_runtime_policy_in(&settings, &project.id, GeometryPolicy::Locked, None, 4).unwrap();
+        let project = create_animation_in(&settings, &project.id, "idle", "east").unwrap();
+        let animation_id = project.animations[0].id.clone();
+        let source = tmp.path().join("board.png");
+        let mut image = image::RgbImage::from_pixel(256, 256, image::Rgb([0, 255, 0]));
+        for y in 20..220 {
+            for x in 40..220 {
+                image.put_pixel(x, y, image::Rgb([210, 106, 53]));
+            }
+        }
+        image.save(&source).unwrap();
+        let original_board_bytes = fs::read(&source).unwrap();
+        import_board_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            source.to_str().unwrap(),
+        )
+        .unwrap();
+        let detected = run_extraction_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 18,
+                min_area: 100,
+                merge_gap: 2,
+            },
+        )
+        .unwrap();
+        let extraction = &detected.animations[0].extractions[0];
+        let curated = apply_extraction_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &extraction.id,
+            vec![extraction.boxes[0].id.clone()],
+            vec![],
+        )
+        .unwrap();
+        confirm_native_review_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            curated.animations[0].active_raw_frame_ids.clone(),
+        )
+        .unwrap();
+        let first = run_batch_snap_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            SnapOptions {
+                colors: 16,
+                pixel_size: Some(1),
+                palette: None,
+            },
+        )
+        .unwrap();
+        let active_id = first.animations[0].batch_snaps.last().unwrap().id.clone();
+        apply_batch_snap_in(&settings, &project.id, &animation_id, &active_id).unwrap();
+        let options = CleanupOptions {
+            background: "#00ff00".into(),
+            tolerance: 24,
+            min_area: 2,
+        };
+        assert!(
+            run_batch_cleanup_in(&settings, &project.id, &animation_id, options.clone()).is_err()
+        );
+        let fitted =
+            run_batch_auto_fit_in(&settings, &project.id, &animation_id, options.clone()).unwrap();
+        let animation = &fitted.animations[0];
+        let run = animation.batch_auto_fit_runs.last().unwrap();
+        let selected_id = run.selected_review_id.as_ref().unwrap();
+        assert!(!run.candidates[0].fits);
+        assert!(run.candidates[1].fits);
+        assert_eq!(
+            animation.active_batch_snap_id.as_deref(),
+            Some(active_id.as_str())
+        );
+        assert!(run
+            .candidates
+            .iter()
+            .find(|item| &item.review_id == selected_id)
+            .unwrap()
+            .frames
+            .iter()
+            .all(|frame| frame.fits));
+        let applied =
+            apply_batch_snap_in(&settings, &project.id, &animation_id, selected_id).unwrap();
+        assert_eq!(
+            applied.animations[0].active_batch_snap_id.as_deref(),
+            Some(selected_id.as_str())
+        );
+        assert_eq!(
+            (
+                applied.runtime.cell_width,
+                applied.runtime.cell_height,
+                applied.runtime.pivot_x,
+                applied.runtime.pivot_y
+            ),
+            (128, 128, 64, 112)
+        );
+        let cleaned = run_batch_cleanup_in(&settings, &project.id, &animation_id, options).unwrap();
+        assert_eq!(
+            cleaned.animations[0]
+                .batch_cleanups
+                .last()
+                .unwrap()
+                .frames
+                .len(),
+            1
+        );
+        assert_eq!(fs::read(&source).unwrap(), original_board_bytes);
+    }
+
+    #[test]
     fn manual_upscale_handoff_versions_inputs_and_resumes_after_restart() {
         let tmp = tempdir().unwrap();
         let settings = test_settings(tmp.path());
@@ -6946,6 +8398,8 @@ mod tests {
             frames: snapped,
             colors: 256,
             pixel_size: Some(1),
+            detected_pixel_size: Some(1.0),
+            auto_fit_run_id: None,
             palette: None,
             tool_version: "fixture".into(),
             created_at: now,

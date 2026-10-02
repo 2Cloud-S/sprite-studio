@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { isTauri } from "@tauri-apps/api/core";
 import { desktop } from "../services/desktop";
-import { latestCleanupReview, latestSnapReview } from "../domain/snap";
+import { latestAutoFitRun, latestBatchAutoFitRun, latestBatchSnapReview, latestCleanupReview, latestSnapReview } from "../domain/snap";
+import { cleanupFitMessage, parseCleanupFit, type CleanupFitDiagnostic } from "../domain/cleanupFit";
 import type {
   AssetPreview,
   Facing,
@@ -27,6 +28,7 @@ interface StudioStore {
   preview: AssetPreview | null;
   snapNative: AssetPreview | null;
   snapReference: AssetPreview | null;
+  autoFitPreviews: Record<string, AssetPreview>;
   activeSnapPreview: AssetPreview | null;
   cleanedPreview: AssetPreview | null;
   normalizedPreview: AssetPreview | null;
@@ -40,6 +42,7 @@ interface StudioStore {
   extractionCandidates: Record<string, AssetPreview>;
   rawFramePreviews: Record<string, AssetPreview>;
   batchSnapPreviews: Record<string, AssetPreview>;
+  batchAutoFitPreviews: Record<string, Record<string, AssetPreview>>;
   batchNormalizedPreviews: Record<string, AssetPreview>;
   batchCleanedPreviews: Record<string, AssetPreview>;
   upscaledPreviews: Record<string, AssetPreview>;
@@ -48,7 +51,11 @@ interface StudioStore {
   pendingHandoffPaths: string[];
   busy: boolean;
   snapBusy: boolean;
+  autoFitBusy: boolean;
+  batchAutoFitBusy: boolean;
   cleanupBusy: boolean;
+  cleanupFit: (CleanupFitDiagnostic & { projectId: string; facing: Facing }) | null;
+  batchCleanupFit: (CleanupFitDiagnostic & { projectId: string; animationId: string }) | null;
   error: string | null;
   boot: () => Promise<void>;
   chooseWorkspace: () => Promise<void>;
@@ -63,6 +70,7 @@ interface StudioStore {
   importFromPicker: (facing: Facing) => Promise<void>;
   chooseSnapper: () => Promise<void>;
   runSnap: (options: SnapOptions) => Promise<void>;
+  runAutoFit: (options: CleanupOptions) => Promise<void>;
   applySnap: (reviewId: string) => Promise<void>;
   choosePython: () => Promise<void>;
   runCleanup: (options: CleanupOptions) => Promise<void>;
@@ -86,12 +94,15 @@ interface StudioStore {
   confirmNativeReview: (acceptedFrameIds: string[]) => Promise<void>;
   replaceRawFrame: (frameId: string, crop?: ManualCrop) => Promise<void>;
   runBatchSnap: (options: SnapOptions) => Promise<void>;
+  runBatchAutoFit: (options: CleanupOptions) => Promise<void>;
+  loadBatchAutoFitPreview: (reviewId: string) => Promise<void>;
   applyBatchSnap: (reviewId: string) => Promise<void>;
   runBatchCleanup: (options: CleanupOptions) => Promise<void>;
   applyBatchCleanup: (reviewId: string) => Promise<void>;
   approveBatchClean: (reviewId: string) => Promise<void>;
   updateWorkflow: (workflow: WorkflowSettings) => Promise<void>;
-  updateRuntime: (cellWidth: number, cellHeight: number, pivotX: number, pivotY: number) => Promise<void>;
+  updateRuntime: (cellWidth: number, cellHeight: number, pivotX: number, pivotY: number, anchorMode: WorkflowSettings["anchorMode"]) => Promise<boolean>;
+  updateRuntimePolicy: (geometryPolicy: Project["runtime"]["geometryPolicy"], neutralHeightTarget: number | null, neutralTolerancePx: number) => Promise<void>;
   importUpscaledFrame: (sourceFrameId: string, path?: string) => Promise<boolean>;
   approveUpscale: () => Promise<void>;
   exportSnapped: (sourceFrameIds: string[]) => Promise<void>;
@@ -100,6 +111,8 @@ interface StudioStore {
 }
 
 function message(error: unknown): string {
+  const fit = parseCleanupFit(error);
+  if (fit) return cleanupFitMessage(fit);
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -108,7 +121,8 @@ async function selectedPreviews(project: Project, facing: Facing) {
   const review = latestSnapReview(project, facing);
   const activeSnapId = project.anchors[facing]?.activeSnapId;
   const cleanup = latestCleanupReview(project, facing);
-  const [preview, snapNative, snapReference, activeSnapPreview, cleanedPreview, normalizedPreview, referenceExportFolder] = await Promise.all([
+  const autoFit = latestAutoFitRun(project, facing);
+  const [preview, snapNative, snapReference, activeSnapPreview, cleanedPreview, normalizedPreview, referenceExportFolder, autoFitEntries] = await Promise.all([
     id ? desktop.preview(project.id, id) : null,
     review ? desktop.snapPreview(project.id, review.id, "native") : null,
     review ? desktop.snapPreview(project.id, review.id, "reference") : null,
@@ -116,8 +130,9 @@ async function selectedPreviews(project: Project, facing: Facing) {
     cleanup ? desktop.cleanupPreview(project.id, cleanup.id, "cleaned") : null,
     cleanup ? desktop.cleanupPreview(project.id, cleanup.id, "normalized") : null,
     project.anchors[facing]?.activeCleanupId ? desktop.referenceExportFolder(project.id, facing).catch(() => null) : null,
+    autoFit ? Promise.all(autoFit.recommendedReviewIds.map(async id => [id, await desktop.snapPreview(project.id, id, "native")] as const)) : [],
   ]);
-  return { preview, snapNative, snapReference, activeSnapPreview, cleanedPreview, normalizedPreview, referenceExportFolder };
+  return { preview, snapNative, snapReference, activeSnapPreview, cleanedPreview, normalizedPreview, referenceExportFolder, autoFitPreviews: Object.fromEntries(autoFitEntries) };
 }
 
 async function animationPreviews(project: Project, animationId: string): Promise<Record<string, AssetPreview>> {
@@ -155,15 +170,19 @@ async function poseBoardPreviews(project: Project, animationId: string) {
 
 async function batchPreviews(project: Project, animationId: string) {
   const animation = project.animations.find(item => item.id === animationId);
-  const snap = animation?.batchSnaps.slice().reverse().find(item => item.extractionId === animation.activeExtractionId && item.sourceFrameIds.join() === animation.activeRawFrameIds.join());
+  const snap = animation ? latestBatchSnapReview(animation) : null;
+  const autoFit = animation ? latestBatchAutoFitRun(project, animation) : null;
   const cleanup = animation?.batchCleanups.slice().reverse().find(item => item.snapReviewId === animation.activeBatchSnapId);
-  const [snapped, cleaned, normalized, upscaled] = await Promise.all([
+  const bestAutoFitId = autoFit?.selectedReviewId;
+  const bestAutoFitReview = animation?.batchSnaps.find(item => item.id === bestAutoFitId);
+  const [snapped, cleaned, normalized, upscaled, autoFitFrames] = await Promise.all([
     snap ? Promise.all(snap.frames.map(async item => [item.sourceFrameId, await desktop.batchFramePreview(project.id, animationId, snap.id, item.sourceFrameId, "snapped")] as const)) : [],
     cleanup ? Promise.all(cleanup.frames.map(async item => [item.sourceFrameId, await desktop.batchFramePreview(project.id, animationId, cleanup.id, item.sourceFrameId, "cleaned")] as const)) : [],
     cleanup ? Promise.all(cleanup.frames.map(async item => [item.sourceFrameId, await desktop.batchFramePreview(project.id, animationId, cleanup.id, item.sourceFrameId, "normalized")] as const)) : [],
     animation ? Promise.all(Object.entries(animation.activeUpscaledFrameIds).map(async ([sourceId, upscaleId]) => [sourceId, await desktop.upscaledPreview(project.id, animationId, upscaleId)] as const)) : [],
+    bestAutoFitReview ? Promise.all(bestAutoFitReview.frames.map(async frame => [frame.sourceFrameId, await desktop.batchFramePreview(project.id, animationId, bestAutoFitReview.id, frame.sourceFrameId, "snapped")] as const)) : [],
   ]);
-  return { batchSnapPreviews: Object.fromEntries(snapped), batchCleanedPreviews: Object.fromEntries(cleaned), batchNormalizedPreviews: Object.fromEntries(normalized), upscaledPreviews: Object.fromEntries(upscaled) };
+  return { batchSnapPreviews: Object.fromEntries(snapped), batchAutoFitPreviews: bestAutoFitId ? { [bestAutoFitId]: Object.fromEntries(autoFitFrames) } : {}, batchCleanedPreviews: Object.fromEntries(cleaned), batchNormalizedPreviews: Object.fromEntries(normalized), upscaledPreviews: Object.fromEntries(upscaled) };
 }
 
 export const useStudio = create<StudioStore>((set, get) => ({
@@ -175,6 +194,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
   preview: null,
   snapNative: null,
   snapReference: null,
+  autoFitPreviews: {},
   activeSnapPreview: null,
   referenceExportFolder: null,
   cleanedPreview: null,
@@ -188,6 +208,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
   extractionCandidates: {},
   rawFramePreviews: {},
   batchSnapPreviews: {},
+  batchAutoFitPreviews: {},
   batchNormalizedPreviews: {},
   batchCleanedPreviews: {},
   upscaledPreviews: {},
@@ -196,7 +217,11 @@ export const useStudio = create<StudioStore>((set, get) => ({
   pendingHandoffPaths: [],
   busy: true,
   snapBusy: false,
+  autoFitBusy: false,
+  batchAutoFitBusy: false,
   cleanupBusy: false,
+  cleanupFit: null,
+  batchCleanupFit: null,
   error: null,
   boot: async () => {
     if (!isTauri()) {
@@ -224,7 +249,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
         selectedAnimationId,
         framePreviews: {},
         exportSheet: null, exportGif: null, exportManifest: null,
-        poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {},
+        poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {},
         busy: false,
         error: state.startupError,
       });
@@ -261,9 +286,11 @@ export const useStudio = create<StudioStore>((set, get) => ({
         deletedProjects: [],
         project: null,
         facing: null,
+        cleanupFit: null,
         preview: null,
         snapNative: null,
         snapReference: null,
+        autoFitPreviews: {},
         activeSnapPreview: null,
         cleanedPreview: null,
         normalizedPreview: null,
@@ -271,7 +298,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
         selectedAnimationId: null,
         framePreviews: {},
         exportSheet: null, exportGif: null, exportManifest: null,
-        poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {},
+        poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {},
         busy: false,
       });
     } catch (error) {
@@ -300,6 +327,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
         preview: null,
         snapNative: null,
         snapReference: null,
+        autoFitPreviews: {},
         activeSnapPreview: null,
         cleanedPreview: null,
         normalizedPreview: null,
@@ -307,7 +335,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
         selectedAnimationId: null,
         framePreviews: {},
         exportSheet: null, exportGif: null, exportManifest: null,
-        poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {},
+        poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {},
         busy: false,
       });
       return true;
@@ -325,7 +353,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
       const wasSelected = get().project?.id === id;
       set({
         settings, projects, deletedProjects, busy: false,
-        ...(wasSelected ? { project: null, facing: null, selectedAnimationId: null, preview: null, snapNative: null, snapReference: null, activeSnapPreview: null, cleanedPreview: null, normalizedPreview: null, referenceExportFolder: null, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {} } : {}),
+        ...(wasSelected ? { project: null, facing: null, selectedAnimationId: null, preview: null, snapNative: null, snapReference: null, autoFitPreviews: {}, activeSnapPreview: null, cleanedPreview: null, normalizedPreview: null, referenceExportFolder: null, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {} } : {}),
       });
       return true;
     } catch (error) { set({ busy: false, error: message(error) }); return false; }
@@ -341,7 +369,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
     } catch (error) { set({ busy: false, error: message(error) }); }
   },
   openProject: async (id) => {
-    set({ busy: true, error: null, preview: null, snapNative: null, snapReference: null, activeSnapPreview: null, cleanedPreview: null, normalizedPreview: null, referenceExportFolder: null, selectedAnimationId: null, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {} });
+    set({ busy: true, error: null, cleanupFit: null, batchCleanupFit: null, preview: null, snapNative: null, snapReference: null, autoFitPreviews: {}, activeSnapPreview: null, cleanedPreview: null, normalizedPreview: null, referenceExportFolder: null, selectedAnimationId: null, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchNormalizedPreviews: {} });
     try {
       const project = await desktop.openProject(id);
       const facing = project.runtime.sourceFacings[0];
@@ -369,7 +397,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
   selectFacing: async (facing) => {
     const project = get().project;
     if (!project) return;
-    set({ facing, preview: null, snapNative: null, snapReference: null, activeSnapPreview: null, cleanedPreview: null, normalizedPreview: null, referenceExportFolder: null, error: null });
+    set({ facing, preview: null, snapNative: null, snapReference: null, autoFitPreviews: {}, activeSnapPreview: null, cleanedPreview: null, normalizedPreview: null, referenceExportFolder: null, cleanupFit: null, error: null });
     try {
       const previews = await selectedPreviews(project, facing);
       if (get().project?.id === project.id && get().facing === facing)
@@ -389,9 +417,11 @@ export const useStudio = create<StudioStore>((set, get) => ({
         project: updated,
         projects,
         facing,
+        cleanupFit: null,
         preview: null,
         snapNative: null,
         snapReference: null,
+        autoFitPreviews: {},
         activeSnapPreview: null,
         cleanedPreview: null,
         normalizedPreview: null,
@@ -432,7 +462,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
     const project = get().project;
     const facing = get().facing;
     if (!project || !facing || get().busy) return;
-    set({ busy: true, snapBusy: true, error: null });
+    set({ busy: true, snapBusy: true, cleanupFit: null, error: null });
     try {
       const updated = await desktop.runSnap(project.id, facing, options);
       set({ project: updated, busy: false, snapBusy: false });
@@ -446,13 +476,34 @@ export const useStudio = create<StudioStore>((set, get) => ({
       set({ busy: false, snapBusy: false, error: message(error) });
     }
   },
+  runAutoFit: async (options) => {
+    const project = get().project;
+    const facing = get().facing;
+    if (!project || !facing || get().busy) return;
+    set({ busy: true, autoFitBusy: true, error: null });
+    try {
+      const updated = await desktop.runAutoFit(project.id, facing, options);
+      set({ project: updated, busy: false, autoFitBusy: false });
+      const previews = await selectedPreviews(updated, facing);
+      if (get().project?.id === updated.id && get().facing === facing) set(previews);
+    } catch (error) {
+      try {
+        const refreshed = await desktop.openProject(project.id);
+        if (get().project?.id === project.id) {
+          set({ project: refreshed });
+          if (get().facing === facing) set(await selectedPreviews(refreshed, facing));
+        }
+      } catch { /* Keep the original auto-fit failure visible. */ }
+      set({ busy: false, autoFitBusy: false, error: message(error) });
+    }
+  },
   applySnap: async (reviewId) => {
     const project = get().project;
     if (!project || get().busy) return;
     set({ busy: true, error: null });
     try {
       const updated = await desktop.applySnap(project.id, reviewId);
-      set({ project: updated, busy: false, cleanedPreview: null, normalizedPreview: null });
+      set({ project: updated, busy: false, cleanupFit: null, cleanedPreview: null, normalizedPreview: null });
       const facing = get().facing;
       if (facing) {
         const previews = await selectedPreviews(updated, facing);
@@ -477,10 +528,10 @@ export const useStudio = create<StudioStore>((set, get) => ({
     const project = get().project;
     const facing = get().facing;
     if (!project || !facing || get().busy) return;
-    set({ busy: true, cleanupBusy: true, error: null });
+    set({ busy: true, cleanupBusy: true, cleanupFit: null, error: null });
     try {
       const updated = await desktop.runCleanup(project.id, facing, options);
-      set({ project: updated, busy: false, cleanupBusy: false });
+      set({ project: updated, busy: false, cleanupBusy: false, cleanupFit: null });
       const previews = await selectedPreviews(updated, facing);
       if (get().project?.id === updated.id && get().facing === facing) set(previews);
     } catch (error) {
@@ -488,7 +539,8 @@ export const useStudio = create<StudioStore>((set, get) => ({
         const refreshed = await desktop.openProject(project.id);
         if (get().project?.id === project.id) set({ project: refreshed });
       } catch { /* Preserve last known project while showing original failure. */ }
-      set({ busy: false, cleanupBusy: false, error: message(error) });
+      const fit = parseCleanupFit(error);
+      set({ busy: false, cleanupBusy: false, error: fit && project.runtime.geometryPolicy === "locked" ? cleanupFitMessage(fit, true) : message(error), cleanupFit: fit ? { ...fit, projectId: project.id, facing } : null });
     }
   },
   applyCleanup: async (reviewId) => {
@@ -529,13 +581,13 @@ export const useStudio = create<StudioStore>((set, get) => ({
     try {
       const updated = await desktop.createAnimation(project.id, name, facing);
       const id = updated.animations[updated.animations.length - 1]?.id ?? null;
-      set({ project: updated, selectedAnimationId: id, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {}, busy: false });
+      set({ project: updated, selectedAnimationId: id, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {}, busy: false });
     } catch (error) { set({ busy: false, error: message(error) }); }
   },
   selectAnimation: async (id) => {
     const project = get().project;
     if (!project || !project.animations.some(item => item.id === id)) return;
-    set({ selectedAnimationId: id, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {}, error: null });
+    set({ selectedAnimationId: id, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {}, error: null });
     try {
       const frames = await animationPreviews(project, id);
       if (get().project?.id === project.id && get().selectedAnimationId === id) set({ framePreviews: frames });
@@ -639,7 +691,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const updated = await desktop.importPoseBoard(project.id, id, path);
-      set({ project: updated, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchNormalizedPreviews: {}, busy: false });
+      set({ project: updated, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {}, busy: false });
       const previews = await poseBoardPreviews(updated, id);
       if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
     } catch (error) { set({ busy: false, error: message(error) }); }
@@ -665,7 +717,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const updated = await desktop.applyPoseExtraction(project.id, id, reviewId, orderedBoxIds, manualCrops);
-      set({ project: updated, batchSnapPreviews: {}, batchNormalizedPreviews: {}, busy: false });
+      set({ project: updated, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {}, busy: false });
       const previews = await poseBoardPreviews(updated, id);
       if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
     } catch (error) { set({ busy: false, error: message(error) }); }
@@ -685,7 +737,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
       if (!crop && typeof path !== "string") return;
       set({ busy: true, error: null });
       const updated = await desktop.replaceRawFrame(project.id, id, frameId, typeof path === "string" ? path : null, crop ?? null);
-      set({ project: updated, batchSnapPreviews: {}, batchCleanedPreviews: {}, batchNormalizedPreviews: {}, upscaledPreviews: {}, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, busy: false });
+      set({ project: updated, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchCleanedPreviews: {}, batchNormalizedPreviews: {}, upscaledPreviews: {}, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, busy: false });
       const previews = await poseBoardPreviews(updated, id);
       if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
     } catch (error) { set({ busy: false, error: message(error) }); }
@@ -693,7 +745,7 @@ export const useStudio = create<StudioStore>((set, get) => ({
   runBatchSnap: async (options) => {
     const project = get().project, id = get().selectedAnimationId;
     if (!project || !id || get().busy) return;
-    set({ busy: true, error: null });
+    set({ busy: true, error: null, batchCleanupFit: null });
     try {
       const updated = await desktop.runBatchSnap(project.id, id, options);
       set({ project: updated, batchSnapPreviews: {}, busy: false });
@@ -704,25 +756,57 @@ export const useStudio = create<StudioStore>((set, get) => ({
       set({ busy: false, error: message(error) });
     }
   },
+  runBatchAutoFit: async (options) => {
+    const project = get().project, id = get().selectedAnimationId;
+    if (!project || !id || get().busy) return;
+    set({ busy: true, batchAutoFitBusy: true, error: null });
+    try {
+      const updated = await desktop.runBatchAutoFit(project.id, id, options);
+      set({ project: updated, busy: false, batchAutoFitBusy: false });
+      const previews = await batchPreviews(updated, id);
+      if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
+    } catch (error) {
+      try {
+        const refreshed = await desktop.openProject(project.id);
+        if (get().project?.id === project.id) {
+          set({ project: refreshed });
+          if (get().selectedAnimationId === id) set(await batchPreviews(refreshed, id));
+        }
+      } catch { /* Keep original auto-fit failure visible. */ }
+      set({ busy: false, batchAutoFitBusy: false, error: message(error) });
+    }
+  },
+  loadBatchAutoFitPreview: async (reviewId) => {
+    const project = get().project, id = get().selectedAnimationId;
+    if (!project || !id || get().batchAutoFitPreviews[reviewId]) return;
+    const review = project.animations.find(item => item.id === id)?.batchSnaps.find(item => item.id === reviewId);
+    if (!review) return;
+    try {
+      const entries = await Promise.all(review.frames.map(async frame => [frame.sourceFrameId, await desktop.batchFramePreview(project.id, id, reviewId, frame.sourceFrameId, "snapped")] as const));
+      if (get().project?.id === project.id && get().selectedAnimationId === id)
+        set(state => ({ batchAutoFitPreviews: { ...state.batchAutoFitPreviews, [reviewId]: Object.fromEntries(entries) } }));
+    } catch (error) { set({ error: message(error) }); }
+  },
   applyBatchSnap: async (reviewId) => {
     const project = get().project, id = get().selectedAnimationId;
     if (!project || !id || get().busy) return;
     set({ busy: true, error: null });
-    try { set({ project: await desktop.applyBatchSnap(project.id, id, reviewId), batchNormalizedPreviews: {}, busy: false }); }
+    try { set({ project: await desktop.applyBatchSnap(project.id, id, reviewId), batchNormalizedPreviews: {}, batchCleanupFit: null, busy: false }); }
     catch (error) { set({ busy: false, error: message(error) }); }
   },
   runBatchCleanup: async (options) => {
     const project = get().project, id = get().selectedAnimationId;
     if (!project || !id || get().busy) return;
-    set({ busy: true, error: null });
+    set({ busy: true, error: null, batchCleanupFit: null });
     try {
       const updated = await desktop.runBatchCleanup(project.id, id, options);
-      set({ project: updated, batchNormalizedPreviews: {}, busy: false });
+      set({ project: updated, batchNormalizedPreviews: {}, batchCleanupFit: null, busy: false });
       const previews = await batchPreviews(updated, id);
       if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
     } catch (error) {
       try { const refreshed = await desktop.openProject(project.id); if (get().project?.id === project.id) set({ project: refreshed }); } catch { /* Keep original error. */ }
-      set({ busy: false, error: message(error) });
+      const fit = parseCleanupFit(error);
+      set({ busy: false, error: fit && project.runtime.geometryPolicy === "locked" ? cleanupFitMessage(fit, true) : message(error), batchCleanupFit: fit ? { ...fit, projectId: project.id, animationId: id } : null });
     }
   },
   applyBatchCleanup: async (reviewId) => {
@@ -750,12 +834,28 @@ export const useStudio = create<StudioStore>((set, get) => ({
     try { set({ project: await desktop.updateWorkflow(project.id, workflow), busy: false }); }
     catch (error) { set({ busy: false, error: message(error) }); }
   },
-  updateRuntime: async (cellWidth, cellHeight, pivotX, pivotY) => {
+  updateRuntime: async (cellWidth, cellHeight, pivotX, pivotY, anchorMode) => {
+    const project = get().project;
+    if (!project || get().busy) return false;
+    set({ busy: true, error: null });
+    try {
+      set({ project: await desktop.updateRuntime(project.id, cellWidth, cellHeight, pivotX, pivotY, anchorMode), busy: false, cleanupFit: null });
+      return true;
+    } catch (error) {
+      set({ busy: false, error: message(error) });
+      return false;
+    }
+  },
+  updateRuntimePolicy: async (geometryPolicy, neutralHeightTarget, neutralTolerancePx) => {
     const project = get().project;
     if (!project || get().busy) return;
     set({ busy: true, error: null });
-    try { set({ project: await desktop.updateRuntime(project.id, cellWidth, cellHeight, pivotX, pivotY), busy: false }); }
-    catch (error) { set({ busy: false, error: message(error) }); }
+    try {
+      const updated = await desktop.updateRuntimePolicy(project.id, geometryPolicy, neutralHeightTarget, neutralTolerancePx);
+      set({ project: updated, autoFitPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, busy: false });
+    } catch (error) {
+      set({ busy: false, error: message(error) });
+    }
   },
   importUpscaledFrame: async (sourceFrameId, path) => {
     const project = get().project, animationId = get().selectedAnimationId;

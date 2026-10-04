@@ -62,6 +62,7 @@ interface StudioStore {
   openWorkspaceFolder: () => Promise<void>;
   openProjectExportsFolder: () => Promise<void>;
   createProject: (name: string, preset: Preset) => Promise<boolean>;
+  renameProject: (id: string, name: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>;
   restoreProject: (id: string) => Promise<void>;
   openProject: (id: string) => Promise<void>;
@@ -78,6 +79,7 @@ interface StudioStore {
   exportReference: () => Promise<void>;
   openReferenceExportFolder: () => Promise<void>;
   createAnimation: (name: string, facing: Facing) => Promise<void>;
+  renameAnimation: (id: string, name: string) => Promise<boolean>;
   selectAnimation: (id: string) => Promise<void>;
   importAnimationFrames: () => Promise<void>;
   proposeAlignment: (offsets: FrameOffset[]) => Promise<void>;
@@ -344,6 +346,23 @@ export const useStudio = create<StudioStore>((set, get) => ({
       return false;
     }
   },
+  renameProject: async (id, name) => {
+    if (get().busy || !get().projects.some(item => item.id === id)) return false;
+    set({ busy: true, error: null });
+    try {
+      const updated = await desktop.renameProject(id, name);
+      const projects = await desktop.listProjects();
+      set(state => ({
+        projects,
+        project: state.project?.id === id ? updated : state.project,
+        busy: false,
+      }));
+      return true;
+    } catch (error) {
+      set({ busy: false, error: message(error) });
+      return false;
+    }
+  },
   deleteProject: async (id) => {
     if (get().busy || !get().projects.some(item => item.id === id)) return false;
     set({ busy: true, error: null });
@@ -583,6 +602,20 @@ export const useStudio = create<StudioStore>((set, get) => ({
       const id = updated.animations[updated.animations.length - 1]?.id ?? null;
       set({ project: updated, selectedAnimationId: id, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, poseBoardPreview: null, extractionCandidates: {}, rawFramePreviews: {}, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchNormalizedPreviews: {}, busy: false });
     } catch (error) { set({ busy: false, error: message(error) }); }
+  },
+  renameAnimation: async (id, name) => {
+    const project = get().project;
+    if (!project || get().busy || !project.animations.some(item => item.id === id)) return false;
+    set({ busy: true, error: null });
+    try {
+      const updated = await desktop.renameAnimation(project.id, id, name);
+      const projects = await desktop.listProjects();
+      set({ project: updated, projects, busy: false });
+      return true;
+    } catch (error) {
+      set({ busy: false, error: message(error) });
+      return false;
+    }
   },
   selectAnimation: async (id) => {
     const project = get().project;

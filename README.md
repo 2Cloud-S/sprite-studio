@@ -67,6 +67,8 @@ The library's **Delete** action moves a complete character project into `deleted
 
 `project.json` uses schema version `1` with additive, backward-compatible fields. It records identity, preset, runtime settings, immutable import/snap/cleanup records, animation frames and reviews, active IDs, SHA-256 hashes, relative paths, and stage states. Reimporting clears dependent active IDs, while prior files and reviews remain intact. Image bytes are validated and copied by Rust. Project-relative paths are validated, and metadata is written through a temporary file before replacement.
 
+Projects can be renamed from the library, and the selected animation can be renamed in its workspace. Renaming updates the display name in `project.json` but leaves project/animation IDs, the original folder slug, assets, and prior exports at their existing paths. Animation names must remain unique per facing within a project.
+
 New projects start with north, south, east, and west sources, 256 × 256 cells, and a (128, 255) default pivot. Runtime cell and pivot settings can be adjusted for the character. Existing projects retain their saved settings. Exporting does not approve art for production or write into another project.
 
 ## Workflow boundary

@@ -24,6 +24,8 @@ export const desktop = {
   setWorkspace: (path: string) => invoke<Settings>("set_workspace", { path }),
   createProject: (name: string, preset: Preset) =>
     invoke<Project>("create_project", { name, preset }),
+  renameProject: (projectId: string, name: string) =>
+    invoke<Project>("rename_project", { projectId, name }),
   openProject: (projectId: string) =>
     invoke<Project>("open_project", { projectId }),
   updateWorkflow: (projectId: string, workflow: WorkflowSettings) => invoke<Project>("update_workflow", { projectId, workflow }),
@@ -67,6 +69,8 @@ export const desktop = {
     invoke<AssetPreview>("read_cleanup_preview", { projectId, reviewId, kind }),
   createAnimation: (projectId: string, name: string, facing: string) =>
     invoke<Project>("create_animation", { projectId, name, facing }),
+  renameAnimation: (projectId: string, animationId: string, name: string) =>
+    invoke<Project>("rename_animation", { projectId, animationId, name }),
   importAnimationFrames: (projectId: string, animationId: string, paths: string[]) =>
     invoke<Project>("import_animation_frames", { projectId, animationId, paths }),
   animationFramePreview: (projectId: string, animationId: string, frameId: string) =>

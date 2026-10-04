@@ -182,7 +182,8 @@ h3 {
   border-color: transparent;
   color: var(--color-ink);
 }
-.project-delete { flex: 0 0 42px; min-width: 42px; min-height: 44px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--color-muted); background: transparent; }
+.project-actions { display: flex; align-items: center; flex: none; }
+.project-rename, .project-delete { min-width: 34px; min-height: 44px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--color-muted); background: transparent; }
 .project-delete:active { transform: translateY(1px); }
 .sidebar-undo { margin: 8px 14px; padding: 10px; border: var(--rule-thin) solid var(--color-rule-strong); border-radius: var(--radius-sm); display: grid; gap: 7px; color: var(--color-ink-soft); font-size: var(--text-xs); }
 .sidebar-undo button { justify-self: start; color: var(--color-accent); background: transparent; border: 0; min-height: 30px; padding: 0 4px; font-weight: 600; }
@@ -1174,6 +1175,11 @@ h3 {
 .animation-tabs button { border: var(--rule-thin) solid transparent; border-radius: 4px; color: var(--color-muted); background: transparent; padding: 7px 11px; white-space: nowrap; font-size: var(--text-sm); }
 .animation-tabs button.selected { color: var(--color-accent); border-color: var(--color-accent-dim); background: var(--color-accent-dim); }
 .animation-tabs small { display: block; color: var(--color-muted); font-size: var(--text-xs); text-align: left; }
+.animation-rename-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 22px; color: var(--color-ink-soft); font-size: var(--text-sm); }
+.animation-rename-row form { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; width: 100%; }
+.animation-rename-row label { display: grid; gap: 4px; flex: 1 1 220px; }
+.animation-rename-row .text-input { min-width: 0; }
+.animation-rename-row .button { min-height: 38px; }
 .animation-editor { padding: 20px 22px 22px; }
 .animation-subheading h3 { margin-top: 4px; }
 .animation-subheading h3 small { color: var(--color-muted); font-size: var(--text-xs); font-weight: 400; }
@@ -1251,6 +1257,7 @@ h3 {
   margin-top: 24px;
 }
 @media (hover: hover) {
+  .project-rename:hover { color: var(--color-accent); background: var(--color-panel-hover); }
   .project-delete:hover { color: var(--color-error); background: var(--color-panel-hover); }
   .start-route:not(.active):hover { background: var(--color-panel-hover); }
   .new-project:hover,

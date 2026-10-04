@@ -12,6 +12,7 @@ import {
   ImagePlus,
   Layers3,
   Maximize2,
+  Pencil,
   Plus,
   RotateCcw,
   ShieldCheck,
@@ -29,7 +30,7 @@ import { AnimationWorkspace } from "./AnimationWorkspace";
 import { WorkflowSettingsPanel } from "./WorkflowSettingsPanel";
 import { WorkflowTip } from "./WorkflowTip";
 import { readablePath } from "./domain/paths";
-import type { Facing, Preset, Project } from "./types";
+import type { Facing, Preset, Project, ProjectSummary } from "./types";
 import "./styles.css";
 
 const facingIcons = {
@@ -162,7 +163,36 @@ function CreateProjectDialog({
   );
 }
 
-function Sidebar({ onNew }: { onNew: () => void }) {
+function RenameProjectDialog({ target, onClose }: { target: ProjectSummary; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [name, setName] = useState(target.name);
+  const [touched, setTouched] = useState(false);
+  const renameProject = useStudio((state) => state.renameProject);
+  const busy = useStudio((state) => state.busy);
+
+  useEffect(() => {
+    const node = dialog.current;
+    if (node && !node.open) node.showModal();
+  }, []);
+
+  const invalid = touched && !name.trim();
+  return <dialog ref={dialog} className="create-dialog" onClose={onClose} onCancel={onClose} aria-labelledby="rename-project-title">
+    <form onSubmit={async event => {
+      event.preventDefault();
+      setTouched(true);
+      if (!name.trim()) return;
+      if (name.trim() === target.name || await renameProject(target.id, name)) onClose();
+    }}>
+      <div className="dialog-heading"><div><span className="eyebrow">CHARACTER PROJECT</span><h2 id="rename-project-title">Rename project</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
+      <label className="field-label" htmlFor="rename-project-name">Character name</label>
+      <input id="rename-project-name" autoFocus className="text-input" value={name} onChange={event => setName(event.target.value)} onBlur={() => setTouched(true)} aria-invalid={invalid} aria-describedby="rename-project-help" maxLength={80} />
+      <p id="rename-project-help" className={`field-help ${invalid ? "field-error" : ""}`}>{invalid ? "Enter a character name." : "Only the display name changes. The project folder and existing assets keep their paths."}</p>
+      <div className="dialog-actions"><button type="button" className="button ghost" onClick={onClose}>Cancel</button><button className="button primary" type="submit" disabled={busy || !name.trim()}>{busy ? "Saving…" : "Save name"}</button></div>
+    </form>
+  </dialog>;
+}
+
+function Sidebar({ onNew, onRename }: { onNew: () => void; onRename: (project: ProjectSummary) => void }) {
   const { projects, deletedProjects, project, openProject, deleteProject, restoreProject, busy, settings, chooseWorkspace, openWorkspaceFolder, openProjectExportsFolder } =
     useStudio();
   const workspacePath = settings?.workspaceRoot ? readablePath(settings.workspaceRoot) : null;
@@ -199,9 +229,12 @@ function Sidebar({ onNew }: { onNew: () => void }) {
               <span className="project-avatar">{item.name.slice(0, 1).toUpperCase()}</span>
               <span className="project-copy"><strong>{item.name}</strong><small>{projectLabel(item.preset)} · {item.importedCount} imports</small></span>
             </button>
-            <button className="project-delete" disabled={busy} aria-label={`Delete ${item.name}`} title={`Delete ${item.name} (recoverable)`} onClick={async () => {
-              if (await deleteProject(item.id)) setRecentlyDeleted({ id: item.id, name: item.name });
-            }}><Trash2 size={16} /></button>
+            <div className="project-actions">
+              <button className="project-rename" disabled={busy} aria-label={`Rename ${item.name}`} title={`Rename ${item.name}`} onClick={() => onRename(item)}><Pencil size={15} /></button>
+              <button className="project-delete" disabled={busy} aria-label={`Delete ${item.name}`} title={`Delete ${item.name} (recoverable)`} onClick={async () => {
+                if (await deleteProject(item.id)) setRecentlyDeleted({ id: item.id, name: item.name });
+              }}><Trash2 size={16} /></button>
+            </div>
           </div>
         ))}
         {projects.length === 0 && (
@@ -571,6 +604,7 @@ function App() {
     selectFacing,
   } = useStudio();
   const [createOpen, setCreateOpen] = useState(false);
+  const [renameProjectTarget, setRenameProjectTarget] = useState<ProjectSummary | null>(null);
   const [dragging, setDragging] = useState(false);
   const [workspaceRoute, setWorkspaceRoute] = useState<"board" | "reference" | null>(null);
   const routeRef = useRef<"board" | "reference" | null>(null);
@@ -629,7 +663,7 @@ function App() {
     <div className="app-shell">
       {settings?.workspaceRoot ? (
         <>
-          <Sidebar onNew={() => setCreateOpen(true)} />
+          <Sidebar onNew={() => setCreateOpen(true)} onRename={setRenameProjectTarget} />
           {project && activeFacing ? (
             <>
               <main className="main-workspace">
@@ -739,6 +773,7 @@ function App() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
       />
+      {renameProjectTarget && <RenameProjectDialog key={renameProjectTarget.id} target={renameProjectTarget} onClose={() => setRenameProjectTarget(null)} />}
     </div>
   );
 }

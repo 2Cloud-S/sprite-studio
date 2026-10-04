@@ -1429,6 +1429,23 @@ fn create_project_in(settings: &Settings, name: &str, preset: Preset) -> Result<
     Ok(project)
 }
 
+fn rename_project_in(settings: &Settings, project_id: &str, name: &str) -> Result<Project> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 80 {
+        return Err("Character name must be 1–80 characters".into());
+    }
+    let (dir, mut project) = find_project(settings, project_id)?;
+    if project.name == name {
+        return Ok(project);
+    }
+    // The slug and on-disk directory stay stable so asset references and
+    // existing export paths remain valid after a display-name change.
+    project.name = name.into();
+    project.updated_at = Utc::now();
+    atomic_json(&dir.join("project.json"), &project)?;
+    Ok(project)
+}
+
 fn update_workflow_in(
     settings: &Settings,
     project_id: &str,
@@ -2951,6 +2968,44 @@ fn create_animation_in(
         created_at: now,
         updated_at: now,
     });
+    project.updated_at = now;
+    atomic_json(&dir.join("project.json"), &project)?;
+    Ok(project)
+}
+
+fn rename_animation_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    name: &str,
+) -> Result<Project> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 60 {
+        return Err("Animation name must be 1–60 characters".into());
+    }
+    let (dir, mut project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter()
+        .find(|item| item.id == animation_id)
+        .ok_or("Animation not found")?;
+    if animation.name == name {
+        return Ok(project);
+    }
+    let facing = animation.facing.clone();
+    if project.animations.iter().any(|item| {
+        item.id != animation_id && item.facing == facing && item.name.eq_ignore_ascii_case(name)
+    }) {
+        return Err("An animation with this name and facing already exists".into());
+    }
+    let now = Utc::now();
+    let animation = project
+        .animations
+        .iter_mut()
+        .find(|item| item.id == animation_id)
+        .unwrap();
+    animation.name = name.into();
+    animation.updated_at = now;
     project.updated_at = now;
     atomic_json(&dir.join("project.json"), &project)?;
     Ok(project)
@@ -5858,6 +5913,21 @@ pub fn create_project(
 }
 
 #[tauri::command]
+pub fn rename_project(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    name: String,
+) -> Result<Project> {
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "Project operation lock is unavailable")?;
+    let settings = read_settings(&settings_file(&app)?)?;
+    rename_project_in(&settings, &project_id, &name)
+}
+
+#[tauri::command]
 pub fn open_project(
     app: tauri::AppHandle,
     state: tauri::State<'_, StudioLock>,
@@ -6044,6 +6114,22 @@ pub fn create_animation(
         .map_err(|_| "Project operation lock is unavailable")?;
     let settings = read_settings(&settings_file(&app)?)?;
     create_animation_in(&settings, &project_id, &name, &facing)
+}
+
+#[tauri::command]
+pub fn rename_animation(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    animation_id: String,
+    name: String,
+) -> Result<Project> {
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "Project operation lock is unavailable")?;
+    let settings = read_settings(&settings_file(&app)?)?;
+    rename_animation_in(&settings, &project_id, &animation_id, &name)
 }
 
 #[tauri::command]
@@ -7149,6 +7235,85 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn project_rename_preserves_folder_slug_and_imported_assets() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "First Fox", Preset::Generic).unwrap();
+        let source = tmp.path().join("source.png");
+        sample_png(&source);
+        let imported =
+            import_into(&settings, &project.id, "east", source.to_str().unwrap()).unwrap();
+        let (original_dir, _) = find_project(&settings, &project.id).unwrap();
+        let original_import = imported.imports[0].clone();
+
+        let renamed = rename_project_in(&settings, &project.id, "  Comet Cat  ").unwrap();
+        assert_eq!(renamed.name, "Comet Cat");
+        assert_eq!(renamed.id, project.id);
+        assert_eq!(renamed.slug, project.slug);
+        assert_eq!(renamed.imports[0].id, original_import.id);
+        assert_eq!(renamed.imports[0].sha256, original_import.sha256);
+        assert_eq!(
+            renamed.anchors["east"].active_import_id,
+            imported.anchors["east"].active_import_id
+        );
+        assert_eq!(
+            find_project(&settings, &project.id).unwrap().0,
+            original_dir
+        );
+        assert_eq!(
+            fs::read(original_dir.join(&original_import.relative_path)).unwrap(),
+            fs::read(&source).unwrap()
+        );
+        assert_eq!(read_project(&original_dir).unwrap().name, "Comet Cat");
+
+        assert!(rename_project_in(&settings, &project.id, "  ").is_err());
+        assert!(rename_project_in(&settings, &project.id, &"x".repeat(81)).is_err());
+        assert_eq!(read_project(&original_dir).unwrap().name, "Comet Cat");
+    }
+
+    #[test]
+    fn animation_rename_preserves_identity_and_blocks_same_facing_duplicates() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "Animation Fox", Preset::Generic).unwrap();
+        let project = create_animation_in(&settings, &project.id, "idle", "east").unwrap();
+        let east_id = project.animations[0].id.clone();
+        create_animation_in(&settings, &project.id, "attack", "east").unwrap();
+        let west = create_animation_in(&settings, &project.id, "idle", "west").unwrap();
+        let west_id = west.animations[2].id.clone();
+        let source = tmp.path().join("board.png");
+        sample_png(&source);
+        let imported =
+            import_board_in(&settings, &project.id, &east_id, source.to_str().unwrap()).unwrap();
+        let board = imported.animations[0].boards[0].clone();
+
+        assert!(rename_animation_in(&settings, &project.id, &east_id, " ATTACK ").is_err());
+        assert!(rename_animation_in(&settings, &project.id, &east_id, "  ").is_err());
+        assert!(rename_animation_in(&settings, &project.id, &east_id, &"x".repeat(61)).is_err());
+        let renamed = rename_animation_in(&settings, &project.id, &east_id, "  walk  ").unwrap();
+        assert_eq!(renamed.animations[0].name, "walk");
+        assert_eq!(renamed.animations[0].id, east_id);
+        assert_eq!(renamed.animations[0].boards[0].id, board.id);
+        assert_eq!(renamed.animations[0].boards[0].sha256, board.sha256);
+        assert_eq!(
+            renamed.animations[0].active_board_id,
+            imported.animations[0].active_board_id
+        );
+        assert_eq!(renamed.animations[1].name, "attack");
+        assert_eq!(renamed.animations[2].name, "idle");
+        let (dir, persisted) = find_project(&settings, &project.id).unwrap();
+        assert_eq!(persisted.animations[0].name, "walk");
+        assert_eq!(
+            fs::read(dir.join(&board.relative_path)).unwrap(),
+            fs::read(&source).unwrap()
+        );
+        let cross_facing = rename_animation_in(&settings, &project.id, &west_id, "attack").unwrap();
+        assert_eq!(cross_facing.animations[1].name, "attack");
+        assert_eq!(cross_facing.animations[2].name, "attack");
+        assert!(rename_animation_in(&settings, &project.id, "missing", "walk").is_err());
     }
 
     #[test]

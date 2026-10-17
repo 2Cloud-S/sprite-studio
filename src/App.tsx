@@ -27,6 +27,8 @@ import { SnapStage } from "./SnapStage";
 import { CleanupStage } from "./CleanupStage";
 import { ReferenceExportPanel } from "./ReferenceExportPanel";
 import { AnimationWorkspace } from "./AnimationWorkspace";
+import { EnvironmentAssets } from "./EnvironmentAssets";
+import { VfxWorkspace } from "./VfxWorkspace";
 import { WorkflowSettingsPanel } from "./WorkflowSettingsPanel";
 import { WorkflowTip } from "./WorkflowTip";
 import { readablePath } from "./domain/paths";
@@ -192,7 +194,7 @@ function RenameProjectDialog({ target, onClose }: { target: ProjectSummary; onCl
   </dialog>;
 }
 
-function Sidebar({ onNew, onRename }: { onNew: () => void; onRename: (project: ProjectSummary) => void }) {
+function Sidebar({ onNew, onRename, environmentActive, vfxActive, navigate }: { onNew: () => void; onRename: (project: ProjectSummary) => void; environmentActive: boolean; vfxActive: boolean; navigate: (workspace: "character" | "environment" | "vfx") => void }) {
   const { projects, deletedProjects, project, openProject, deleteProject, restoreProject, busy, settings, chooseWorkspace, openWorkspaceFolder, openProjectExportsFolder } =
     useStudio();
   const workspacePath = settings?.workspaceRoot ? readablePath(settings.workspaceRoot) : null;
@@ -208,9 +210,17 @@ function Sidebar({ onNew, onRename }: { onNew: () => void; onRename: (project: P
         <StudioMark />
         <div>
           <strong>Sprite Studio</strong>
-          <span>CHARACTER WORKSPACE</span>
+          <span>PIXEL ASSET WORKSPACE</span>
         </div>
       </div>
+      <nav className="studio-main-nav" aria-label="Main workspaces">
+        <button aria-current={!environmentActive && !vfxActive ? "page" : undefined} onClick={() => navigate("character")}><ImagePlus size={18}/>Character Animations</button>
+        <button aria-current={environmentActive ? "page" : undefined} onClick={() => navigate("environment")}><Layers3 size={18}/>Environment Assets</button>
+        <button aria-current={vfxActive ? "page" : undefined} onClick={() => navigate("vfx")}><Sparkles size={18}/>Visual Effects</button>
+      </nav>
+      {environmentActive && <div className="environment-sidebar-help"><h3>Environment Assets</h3><p>Select an environment project and package in the main area.</p><p>Import → Process → Review → Approve → Export</p><small>Separate storage. No character workflow states are changed.</small></div>}
+      {vfxActive && <div className="environment-sidebar-help"><h3>Visual Effects</h3><p>Original PNG → reviewed regions → fixed cells → tick holds → approval → export.</p><small>Detached particles preserved. Independent effect revisions.</small></div>}
+      <div className="character-library" hidden={environmentActive || vfxActive}>
       <div className="sidebar-section-label">
         LIBRARY <span>{projects.length}</span>
       </div>
@@ -245,6 +255,7 @@ function Sidebar({ onNew, onRename }: { onNew: () => void; onRename: (project: P
       </nav>
       {recentlyDeleted && <div className="sidebar-undo" role="status"><span>{recentlyDeleted.name} moved to Recently deleted.</span><button disabled={busy} onClick={() => { void restoreProject(recentlyDeleted.id); setRecentlyDeleted(null); }}>Undo</button></div>}
       {deletedProjects.length > 0 && <details className="deleted-projects"><summary>Recently deleted <span>{deletedProjects.length}</span></summary><div>{deletedProjects.map(item => <div className="deleted-project" key={item.id}><span title={item.name}>{item.name}</span><button disabled={busy} onClick={() => { void restoreProject(item.id); setRecentlyDeleted(null); }} aria-label={`Restore ${item.name}`}><RotateCcw size={14} /> Restore</button></div>)}</div><p>Kept in this workspace’s deleted-projects folder.</p></details>}
+      </div>
       <div className="sidebar-bottom">
         <div className="workspace-caption">WORKSPACE</div>
         <button
@@ -263,10 +274,11 @@ function Sidebar({ onNew, onRename }: { onNew: () => void; onRename: (project: P
         </button>
         <small className="workspace-path" title={workspacePath ?? undefined}>{workspacePath}</small>
         <button className="workspace-change" onClick={() => void chooseWorkspace()}>Change workspace…</button>
-        <div className="workspace-caption exports-caption">PROJECT EXPORTS</div>
+        {!environmentActive && !vfxActive && <><div className="workspace-caption exports-caption">PROJECT EXPORTS</div>
         <button className="workspace-button" onClick={() => void openProjectExportsFolder()} disabled={!project} title={project ? `Open exports for ${project.name}` : "Select a character project first"}>
           <FolderOpen size={18} /> <span>{project ? `${project.name} exports` : "Select a character"}</span>
         </button>
+        </>}
       </div>
     </aside>
   );
@@ -606,18 +618,23 @@ function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [renameProjectTarget, setRenameProjectTarget] = useState<ProjectSummary | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [workspaceRoute, setWorkspaceRoute] = useState<"board" | "reference" | null>(null);
-  const routeRef = useRef<"board" | "reference" | null>(null);
+  const [workspaceRoute, setWorkspaceRoute] = useState<"board" | "reference" | "environment" | "vfx" | null>(()=>localStorage.getItem("sprite-studio:main-workspace")==="vfx" ? "vfx" : localStorage.getItem("sprite-studio:main-workspace")==="environment" ? "environment" : null);
+  const routeRef = useRef<"board" | "reference" | "environment" | "vfx" | null>(workspaceRoute);
+  const characterRoute = useRef<"board" | "reference" | null>(null);
   useEffect(() => {
     const route = project?.animations.length ? "board" : project?.imports.length ? "reference" : null;
+    characterRoute.current = route;
+    if (routeRef.current === "environment" || routeRef.current === "vfx") return;
     setWorkspaceRoute(route);
     routeRef.current = route;
   }, [project?.id]);
-  const navigateRoute = (route: "board" | "reference") => {
+  const navigateRoute = (route: "board" | "reference" | "environment" | "vfx") => {
+    if (route !== "environment" && route !== "vfx") characterRoute.current = route;
+    localStorage.setItem("sprite-studio:main-workspace",route === "environment" ? "environment" : route === "vfx" ? "vfx" : "character");
     routeRef.current = route;
     setWorkspaceRoute(route);
     window.requestAnimationFrame(() => {
-      document.getElementById(route === "board" ? "animation-workspace" : "reference-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById(route === "board" ? "animation-workspace" : route === "environment" ? "environment-workspace" : route === "vfx" ? "vfx-workspace" : "reference-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
   useEffect(() => {
@@ -636,6 +653,11 @@ function App() {
           const path = event.payload.paths[0];
           const state = useStudio.getState();
           if (!path) return;
+          if (routeRef.current === "vfx") { useStudio.setState({ error: "Use the Visual Effects import picker to assign frames. Character drop imports are disabled here." }); return; }
+          if (routeRef.current === "environment") {
+            useStudio.setState({ error: "Use Import layer PNG in the Environment Asset editor to assign this image to its asset. Character drop imports are disabled here." });
+            return;
+          }
           if (state.handoffDropArmed) {
             useStudio.setState({ handoffDropArmed: false, pendingHandoffPaths: event.payload.paths });
             return;
@@ -659,17 +681,20 @@ function App() {
     };
   }, []);
   const activeFacing = facing ?? project?.runtime.sourceFacings[0] ?? null;
+  const characterView = workspaceRoute === "environment" || workspaceRoute === "vfx" ? characterRoute.current : workspaceRoute;
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${workspaceRoute === "environment" || workspaceRoute === "vfx" ? "environment-shell" : ""}`}>
       {settings?.workspaceRoot ? (
         <>
-          <Sidebar onNew={() => setCreateOpen(true)} onRename={setRenameProjectTarget} />
+          <Sidebar onNew={() => setCreateOpen(true)} onRename={setRenameProjectTarget} environmentActive={workspaceRoute === "environment"} vfxActive={workspaceRoute === "vfx"} navigate={destination=>{if(destination!=="character")navigateRoute(destination);else{routeRef.current=characterRoute.current;setWorkspaceRoute(characterRoute.current);localStorage.setItem("sprite-studio:main-workspace","character");}}} />
+          <main className="main-workspace environment-main" hidden={workspaceRoute !== "environment"}><header className="topbar"><div className="breadcrumbs"><strong>Environment Assets</strong></div><div className="topbar-status"><span className="live-dot"/>Saved locally · independent asset workspace</div></header><div className="workspace-content"><EnvironmentAssets key={settings.workspaceRoot} workspace={settings.workspaceRoot}/></div></main>
+          <main className="main-workspace environment-main" hidden={workspaceRoute !== "vfx"}><header className="topbar"><div className="breadcrumbs"><strong>Visual Effects</strong></div><div className="topbar-status"><span className="live-dot"/>Fixed origin · local revisions</div></header><div className="workspace-content"><VfxWorkspace key={settings.workspaceRoot} workspace={settings.workspaceRoot}/></div></main>
           {project && activeFacing ? (
             <>
-              <main className="main-workspace">
+              <main className="main-workspace" hidden={workspaceRoute === "environment" || workspaceRoute === "vfx"}>
                 <header className="topbar">
                   <div className="breadcrumbs">
-                    <span>Characters</span>
+                    <span>{workspaceRoute === "environment" ? "Environment assets" : "Characters"}</span>
                     <span className="breadcrumb-separator">/</span>
                     <strong>{project.name}</strong>
                     <span className="preset-badge">
@@ -683,10 +708,10 @@ function App() {
                 <div className="workspace-content">
                   <div className="page-heading">
                     <div>
-                      <span className="eyebrow">CHARACTER PROJECT</span>
+                      <span className="eyebrow">{workspaceRoute === "environment" ? "STATIC ENVIRONMENT WORKSPACE" : "CHARACTER PROJECT"}</span>
                       <h1>{project.name}</h1>
                       <p>
-                        Choose what you have. A pose board and a single reference image are different starting points.
+                        Choose a character workflow or prepare independent full-canvas static environment layers.
                       </p>
                     </div>
                   </div>
@@ -698,7 +723,7 @@ function App() {
                       <span className="start-route-icon"><ImagePlus size={21} /></span><span><strong>Single reference image</strong><small>One neutral image for a facing. Use it to establish character identity—not as a multi-frame pose board.</small><em>Open reference workflow <ArrowRight size={15} /></em></span>
                     </button>
                   </section>
-                  {workspaceRoute === "reference" && <section id="reference-workspace" className="reference-workspace" aria-label="Single-image reference workflow">
+                  {characterView === "reference" && <section id="reference-workspace" className="reference-workspace" aria-label="Single-image reference workflow">
                     <div className="anchor-heading"><div><h2>Single-image references</h2><p>Optional neutral images by facing. Import a pose board under “Pose board → animation” instead.</p></div><span>{project.runtime.sourceFacings.filter(f => project.anchors[f]?.activeImportId).length} of {project.runtime.sourceFacings.length} references</span></div>
                     <WorkflowSettingsPanel project={project} />
                     <WorkflowTip label="Source image · suggested">Start with one neutral, full-body image on flat #00FF00 chroma, or magenta when green conflicts with the character. A 1024 × 1024 square gives grid recovery room to work; it is a generation suggestion, not the runtime size. Keep generous margins, a simple silhouette, no smoothing, and no action-only effects. For another facing, use the applied snapped reference as the identity input, then snap that new facing too.</WorkflowTip>
@@ -711,13 +736,13 @@ function App() {
                     <CleanupStage project={project} facing={activeFacing} />
                     <ReferenceExportPanel project={project} facing={activeFacing} />
                   </section>}
-                  {workspaceRoute === "board" && <AnimationWorkspace project={project} facing={activeFacing} />}
+                  {characterView === "board" && <AnimationWorkspace project={project} facing={activeFacing} />}
                 </div>
               </main>
-              {workspaceRoute === "reference" ? <Inspector project={project} facing={activeFacing} /> : <BoardInspector project={project} route={workspaceRoute} />}
+              {workspaceRoute === "environment" || workspaceRoute === "vfx" ? null : workspaceRoute === "reference" ? <Inspector project={project} facing={activeFacing} /> : <BoardInspector project={project} route={workspaceRoute} />}
             </>
           ) : (
-            <main className="main-workspace">
+            <main className="main-workspace" hidden={workspaceRoute === "environment" || workspaceRoute === "vfx"}>
               <header className="topbar">
                 <div className="breadcrumbs">
                   <strong>Characters</strong>
@@ -743,7 +768,7 @@ function App() {
           {busy
             ? "Working…"
             : project
-              ? `${project.runtime.cellWidth} × ${project.runtime.cellHeight} CELL · ${project.preset === "kangi-fight" ? "RIGHT SOURCE" : "4 SOURCE DIRECTIONS"}`
+              ? workspaceRoute === "environment" ? "ENVIRONMENT PACKAGES · REVISION-BASED · LOCAL" : workspaceRoute === "vfx" ? "VFX · FIXED CELLS · EXPLICIT TICKS" : `${project.runtime.cellWidth} × ${project.runtime.cellHeight} CELL · ${project.preset === "kangi-fight" ? "RIGHT SOURCE" : "4 SOURCE DIRECTIONS"}`
               : "LOCAL PROJECTS"}
         </span>
       </footer>
@@ -764,8 +789,8 @@ function App() {
         <div className="drop-overlay" aria-label={handoffDropArmed ? "Drop upscaled PNGs" : "Drop image to import"}>
           <div>
             <ImagePlus size={42} />
-            <h2>{handoffDropArmed ? "Drop upscaled PNGs" : workspaceRoute === "board" ? "Drop pose board" : workspaceRoute === "reference" ? `Drop ${activeFacing} reference` : "Choose a starting point first"}</h2>
-            <p>{handoffDropArmed ? "You’ll confirm which imported file belongs to each snapped frame." : workspaceRoute === "board" ? "The board will be copied into the selected animation." : workspaceRoute === "reference" ? "The reference will be copied into this project." : "Choose Pose board or Single reference above."}</p>
+            <h2>{workspaceRoute === "environment" ? "Use Import layer PNG" : handoffDropArmed ? "Drop upscaled PNGs" : workspaceRoute === "board" ? "Drop pose board" : workspaceRoute === "reference" ? `Drop ${activeFacing} reference` : "Choose a starting point first"}</h2>
+            <p>{workspaceRoute === "environment" ? "Select the intended static layer, then import with its file picker. No character data is changed." : handoffDropArmed ? "You’ll confirm which imported file belongs to each snapped frame." : workspaceRoute === "board" ? "The board will be copied into the selected animation." : workspaceRoute === "reference" ? "The reference will be copied into this project." : "Choose Pose board or Single reference above."}</p>
           </div>
         </div>
       )}

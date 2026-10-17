@@ -40,6 +40,12 @@ export interface SnapOptions {
   pixelSize: number | null;
   palette: string | null;
 }
+export type PixelScaleMode = "perFrameAuto" | "sharedAnimationScale";
+export interface BatchSnapOptions extends SnapOptions {
+  scaleMode: PixelScaleMode;
+  scaleAnalysisId: string | null;
+  scaleReferenceFrameId: string | null;
+}
 export interface SnapOutputPaths { nativePath: string; snappedPath: string | null; upscaledPath: string | null; chromaPath: string | null; mode: "anchor" | "frame"; }
 
 export interface SnapReview {
@@ -98,6 +104,7 @@ export interface CleanupOptions {
   tolerance: number;
   minArea: number;
 }
+export interface AnimationCleanupSettings extends CleanupOptions { greenFringeDespeckle: boolean; }
 
 export interface CleanupReview {
   id: string;
@@ -208,11 +215,41 @@ export interface RawAnimationFrame {
   width: number;
   height: number;
   createdAt: string;
+  sourceKind: "boardCrop" | "standaloneReplacement";
+  sourceRelativePath: string | null;
+  sourceSha256: string | null;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
+  sourceCrop: ManualCrop | null;
+  backgroundHex: string | null;
+}
+
+export interface FrameRecoveryReview {
+  id: string;
+  targetFrameId: string;
+  sourceKind: "boardCrop" | "standaloneReplacement";
+  sourceRelativePath: string;
+  sourceSha256: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  crop: ManualCrop;
+  foregroundWidth: number;
+  foregroundHeight: number;
+  foregroundPixels: number;
+  backgroundHex: string;
+  candidateRelativePath: string;
+  candidateSha256: string;
+  createdAt: string;
+  appliedAt: string | null;
 }
 
 export interface BatchFrameArtifact { sourceFrameId: string; relativePath: string; sha256: string; width: number; height: number; upscaledRelativePath: string | null; chromaRelativePath: string | null; outputs: SnapOutputPaths | null; }
 export interface UpscaledFrame { id: string; snapReviewId: string; sourceFrameId: string; version: number; originalName: string; relativePath: string; sha256: string; width: number; height: number; importedAt: string; }
-export interface BatchSnapReview { id: string; extractionId: string; sourceFrameIds: string[]; frames: BatchFrameArtifact[]; colors: number; pixelSize: number | null; detectedPixelSize: number | null; autoFitRunId: string | null; palette: string | null; toolVersion: string; createdAt: string; appliedAt: string | null; }
+export interface ScaleRegion { width: number; height: number; area: number; }
+export interface ScaleConsistencyMetric { sourceFrameId: string; foregroundWidth: number; foregroundHeight: number; foregroundArea: number; detectedPixelSize: number | null; effectivePixelSize: number | null; headRegion: ScaleRegion | null; bodyCoreRegion: ScaleRegion | null; pitchDiffers: boolean; }
+export interface ScaleAnalysisFrame { sourceFrameId: string; sourceSha256: string; estimatedPixelSize: number; roundedPixelSize: number; nativeRelativePath: string; nativeSha256: string; }
+export interface ScaleAnalysis { id: string; extractionId: string; sourceFrameIds: string[]; frames: ScaleAnalysisFrame[]; recommendedPixelSize: number; inconsistentAutoPitch: boolean; colors: number; palette: string | null; toolVersion: string; createdAt: string; }
+export interface BatchSnapReview { id: string; extractionId: string; sourceFrameIds: string[]; frames: BatchFrameArtifact[]; colors: number; pixelSize: number | null; detectedPixelSize: number | null; scaleMode: PixelScaleMode; scaleAnalysisId: string | null; scaleReferenceFrameId: string | null; scaleMetrics: ScaleConsistencyMetric[]; scaleInconsistency: boolean; autoFitRunId: string | null; palette: string | null; toolVersion: string; createdAt: string; appliedAt: string | null; }
 export interface BatchAutoFitFrame { sourceFrameId: string; foregroundWidth: number; foregroundHeight: number; foregroundPixels: number; removedSpecklePixels: number; fits: boolean; }
 export interface BatchAutoFitCandidate { reviewId: string; pixelSize: number; frames: BatchAutoFitFrame[]; fits: boolean; worstTargetDelta: number | null; totalForegroundPixels: number; totalSpeckleLoss: number; }
 export interface BatchAutoFitRun { id: string; extractionId: string; sourceFrameIds: string[]; cellWidth: number; cellHeight: number; pivotX: number; pivotY: number; neutralHeightTarget: number | null; neutralTolerancePx: number; startingPixelSize: number; candidates: BatchAutoFitCandidate[]; recommendedReviewIds: string[]; selectedReviewId: string | null; createdAt: string; }
@@ -291,14 +328,17 @@ export interface Animation {
   extractions: ExtractionReview[];
   activeExtractionId: string | null;
   rawFrames: RawAnimationFrame[];
+  frameRecoveries: FrameRecoveryReview[];
   activeRawFrameIds: string[];
   batchSnaps: BatchSnapReview[];
+  scaleAnalyses: ScaleAnalysis[];
   batchAutoFitRuns: BatchAutoFitRun[];
   activeBatchSnapId: string | null;
   upscaledFrames: UpscaledFrame[];
   activeUpscaledFrameIds: Record<string, string>;
   upscaleApproved: boolean;
   batchCleanups: BatchCleanupReview[];
+  cleanupSettings: AnimationCleanupSettings | null;
   activeBatchCleanupId: string | null;
   alignments: AlignmentReview[];
   previews: AnimationPreviewReview[];

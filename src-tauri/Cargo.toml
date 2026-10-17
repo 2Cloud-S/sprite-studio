@@ -1,5 +1,6 @@
 [package]
 name = "sprite-studio"
+default-run = "sprite-studio"
 version = "0.1.0"
 description = "Local-first sprite character workspace"
 authors = ["Sprite Studio"]

@@ -1,0 +1,292 @@
+/* Only prefixed button/badge modules; existing workspace CSS and theme remain authoritative. */
+@plugin "daisyui" {
+  themes: false;
+  root: ".vfx-workspace";
+  include: button, badge;
+  prefix: vfx-ui-;
+  logs: false;
+}
+.vfx-workspace {
+  --color-base-100: var(--color-panel);
+  --color-base-200: var(--color-panel-raised);
+  --color-base-300: var(--color-rule);
+  --color-base-content: var(--color-ink);
+  --color-primary: var(--color-accent);
+  --color-primary-content: var(--color-accent-ink);
+  --radius-field: var(--radius-sm);
+  --radius-selector: var(--radius-sm);
+  --size-field: 0.25rem;
+  --size-selector: 0.25rem;
+  --border: 1px;
+  display: grid;
+  gap: 20px;
+}
+.vfx-workspace label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--color-ink-soft);
+}
+.vfx-workspace label:has(input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+.vfx-workspace input:not([type="checkbox"]),
+.vfx-workspace select,
+.vfx-workspace textarea {
+  background: var(--color-stage);
+  color: var(--color-ink);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  max-width: 100%;
+}
+.vfx-workspace input[type="number"] {
+  width: 100px;
+}
+.vfx-workspace textarea {
+  width: 100%;
+  min-height: 70px;
+  font-family: monospace;
+}
+.vfx-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.vfx-toolbar form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+.vfx-hub {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.vfx-library {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  top: 12px;
+}
+.vfx-effect-row {
+  display: flex;
+  text-align: left;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--color-rule);
+  background: var(--color-panel);
+  border-radius: var(--radius-sm);
+}
+.vfx-effect-row.active {
+  border-color: var(--color-accent);
+}
+.vfx-effect-row span {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.vfx-effect-row small {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.vfx-section {
+  border: 1px solid var(--color-rule);
+  padding: 18px;
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+.vfx-editor {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+.vfx-editor-body {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.vfx-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-bottom: 1px solid var(--color-rule);
+  padding-bottom: 12px;
+}
+.vfx-tabs [aria-pressed="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.vfx-workspace h3 {
+  font-size: 17px;
+}
+.vfx-notice {
+  border-left: 3px solid var(--color-accent);
+  padding: 10px 14px;
+  background: var(--color-panel-raised);
+  overflow-wrap: anywhere;
+}
+.vfx-region-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+.vfx-region-row label {
+  font-size: 11px;
+}
+.vfx-region-row input {
+  width: 65px !important;
+}
+.vfx-originals,
+.vfx-crops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: start;
+}
+.vfx-originals figure {
+  width: 100%;
+  max-width: 650px;
+}
+.vfx-workspace figure {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.vfx-workspace figcaption {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.vfx-crops img,
+.vfx-board,
+.vfx-cell.checker {
+  background: conic-gradient(
+      var(--color-check-a) 25%,
+      var(--color-check-b) 0 50%,
+      var(--color-check-a) 0 75%,
+      var(--color-check-b) 0
+    )
+    0 0 / 16px 16px;
+}
+.vfx-workspace img {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  object-fit: contain;
+}
+.vfx-board {
+  position: relative;
+  width: 100%;
+}
+.vfx-board img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.vfx-region-overlay {
+  position: absolute;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  font: 12px monospace;
+  pointer-events: none;
+}
+.vfx-frame-settings {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+.vfx-frame-settings summary {
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.vfx-preview-stage {
+  overflow: auto;
+  max-height: 580px;
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background-color: var(--color-stage);
+  background-size: cover;
+  border: 1px solid var(--color-rule);
+}
+.vfx-cell {
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: content-box;
+  outline: 1px solid var(--color-rule-strong);
+  background-color: var(--color-stage);
+}
+.vfx-cell.dark {
+  background: #101010;
+}
+.vfx-cell.light {
+  background: #f4f4f4;
+}
+.vfx-cell img {
+  display: block;
+  max-width: none;
+}
+.vfx-anchor-h,
+.vfx-anchor-v {
+  position: absolute;
+  pointer-events: none;
+  background: var(--color-accent);
+  opacity: 0.8;
+}
+.vfx-anchor-h {
+  left: -10px;
+  right: -10px;
+  height: 1px;
+}
+.vfx-anchor-v {
+  top: -10px;
+  bottom: -10px;
+  width: 1px;
+}
+.vfx-path {
+  font-family: monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.vfx-history-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+.vfx-history-row small {
+  flex-basis: 100%;
+}
+.vfx-check {
+  padding: 4px 0;
+}
+@media (max-width: 1200px) {
+  .vfx-hub {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+  .vfx-section {
+    padding: 12px;
+  }
+}
+@media (max-width: 850px) {
+  .vfx-hub {
+    grid-template-columns: 1fr;
+  }
+  .vfx-library {
+    position: static;
+  }
+}

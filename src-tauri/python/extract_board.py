@@ -18,6 +18,8 @@ def main() -> None:
     parser.add_argument("tolerance", type=int)
     parser.add_argument("min_area", type=int)
     parser.add_argument("merge_gap", type=int)
+    parser.add_argument("--single", action="store_true", help="Recover the dominant pose from one replacement image")
+    parser.add_argument("--manual", nargs=4, type=int, metavar=("X", "Y", "W", "H"))
     args = parser.parse_args()
     with Image.open(args.source) as source:
         pixels = np.asarray(source.convert("RGBA"), dtype=np.uint8)
@@ -30,20 +32,18 @@ def main() -> None:
     difference = pixels[:, :, :3].astype(np.int16) - np.array(background, dtype=np.int16)
     key = np.sum(difference.astype(np.int32) ** 2, axis=2) <= args.tolerance ** 2
     foreground = (pixels[:, :, 3] >= 128) & ~key
-    if args.merge_gap:
-        size = args.merge_gap * 2 + 1
-        grouped = cv2.dilate(foreground.astype(np.uint8), np.ones((size, size), np.uint8))
-    else:
-        grouped = foreground.astype(np.uint8)
-    count, labels, _, _ = cv2.connectedComponentsWithStats(grouped, 8)
-    found = []
-    for label in range(1, count):
-        ys, xs = np.nonzero(foreground & (labels == label))
+    if args.manual:
+        x, y, w, h = args.manual
+        if x < 0 or y < 0 or w < 1 or h < 1 or x + w > width or y + h > height:
+            raise ValueError("Manual crop is outside the active source image")
+        ys, xs = np.nonzero(foreground[y:y + h, x:x + w])
         if len(xs) < args.min_area:
-            continue
-        x0, x1 = max(0, int(xs.min()) - 2), min(width, int(xs.max()) + 3)
-        y0, y1 = max(0, int(ys.min()) - 2), min(height, int(ys.max()) + 3)
-        found.append((y0, x0, x1 - x0, y1 - y0, len(xs)))
+            raise ValueError("No pose foreground detected in the manual crop")
+        found = [(y, x, w, h, len(xs), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1))]
+    else:
+        found = detect_components(foreground, args.merge_gap, args.min_area, width, height)
+        if args.single and found:
+            found = [max(found, key=lambda item: (item[4], item[2] * item[3], -item[1]))]
     # Group by visual row before sorting X: poses in one row often have
     # different heights, so sorting by top edge alone interleaves columns.
     rows = []
@@ -65,12 +65,31 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     boxes = []
-    for index, (y, x, w, h, area) in enumerate(found):
+    for index, (y, x, w, h, area, foreground_width, foreground_height) in enumerate(found):
         filename = f"candidate-{index:02d}.png"
         Image.fromarray(pixels[y:y + h, x:x + w], "RGBA").save(output_dir / filename, format="PNG")
         boxes.append({"x": x, "y": y, "width": w, "height": h,
+                      "foregroundWidth": foreground_width, "foregroundHeight": foreground_height,
                       "foregroundPixels": area, "filename": filename})
     print(json.dumps({"backgroundHex": "".join(f"{v:02x}" for v in background), "boxes": boxes}))
+
+
+def detect_components(foreground, merge_gap, min_area, width, height):
+    if merge_gap:
+        size = merge_gap * 2 + 1
+        grouped = cv2.dilate(foreground.astype(np.uint8), np.ones((size, size), np.uint8))
+    else:
+        grouped = foreground.astype(np.uint8)
+    count, labels, _, _ = cv2.connectedComponentsWithStats(grouped, 8)
+    found = []
+    for label in range(1, count):
+        ys, xs = np.nonzero(foreground & (labels == label))
+        if len(xs) < min_area:
+            continue
+        x0, x1 = max(0, int(xs.min()) - 2), min(width, int(xs.max()) + 3)
+        y0, y1 = max(0, int(ys.min()) - 2), min(height, int(ys.max()) + 3)
+        found.append((y0, x0, x1 - x0, y1 - y0, len(xs), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)))
+    return found
 
 
 if __name__ == "__main__":

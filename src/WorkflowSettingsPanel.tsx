@@ -71,7 +71,7 @@ export function WorkflowSettingsPanel({ project }: { project: Project }) {
     </div>
     <div className="animation-actions">
       <label><input type="checkbox" checked={workflow.manualPolishEnabled} onChange={event => setWorkflow({ ...workflow, manualPolishEnabled: event.target.checked })} /> Manual aligner polish</label>
-      <label><input type="checkbox" checked={workflow.greenFringeDespeckle} onChange={event => setWorkflow({ ...workflow, greenFringeDespeckle: event.target.checked })} /> Green fringe cleanup</label>
+      <label><input type="checkbox" checked={workflow.greenFringeDespeckle} onChange={event => setWorkflow({ ...workflow, greenFringeDespeckle: event.target.checked })} /> Default fringe cleanup for new animations</label>
       <button className="button secondary" disabled={busy || !workflowValid} onClick={() => void updateWorkflow({ ...workflow, anchorMode: project.workflow.anchorMode })}><Check size={15} /> Save workflow</button>
     </div>
 

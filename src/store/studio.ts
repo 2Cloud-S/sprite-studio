@@ -11,7 +11,9 @@ import type {
   ProjectSummary,
   Settings,
   SnapOptions,
+  BatchSnapOptions,
   CleanupOptions,
+  AnimationCleanupSettings,
   FrameOffset,
   ExportOptions,
   ExtractionOptions,
@@ -41,6 +43,9 @@ interface StudioStore {
   poseBoardPreview: AssetPreview | null;
   extractionCandidates: Record<string, AssetPreview>;
   rawFramePreviews: Record<string, AssetPreview>;
+  frameRecoveryPreviews: Record<string, AssetPreview>;
+  frameSourcePreviews: Record<string, AssetPreview>;
+  frameRecoverySourcePreviews: Record<string, AssetPreview>;
   batchSnapPreviews: Record<string, AssetPreview>;
   batchAutoFitPreviews: Record<string, Record<string, AssetPreview>>;
   batchNormalizedPreviews: Record<string, AssetPreview>;
@@ -94,8 +99,10 @@ interface StudioStore {
   runPoseExtraction: (options: ExtractionOptions) => Promise<void>;
   applyPoseExtraction: (reviewId: string, orderedBoxIds: string[], manualCrops: ManualCrop[]) => Promise<void>;
   confirmNativeReview: (acceptedFrameIds: string[]) => Promise<void>;
-  replaceRawFrame: (frameId: string, crop?: ManualCrop) => Promise<void>;
-  runBatchSnap: (options: SnapOptions) => Promise<void>;
+  replaceRawFrame: (frameId: string, mode: "pick" | "auto" | ManualCrop, options: ExtractionOptions, sourceReviewId?: string) => Promise<void>;
+  applyFrameRecovery: (reviewId: string) => Promise<void>;
+  analyzeBatchScale: (options: SnapOptions) => Promise<void>;
+  runBatchSnap: (options: BatchSnapOptions) => Promise<void>;
   runBatchAutoFit: (options: CleanupOptions) => Promise<void>;
   loadBatchAutoFitPreview: (reviewId: string) => Promise<void>;
   applyBatchSnap: (reviewId: string) => Promise<void>;
@@ -103,6 +110,7 @@ interface StudioStore {
   applyBatchCleanup: (reviewId: string) => Promise<void>;
   approveBatchClean: (reviewId: string) => Promise<void>;
   updateWorkflow: (workflow: WorkflowSettings) => Promise<void>;
+  updateAnimationCleanupSettings: (settings: AnimationCleanupSettings) => Promise<boolean>;
   updateRuntime: (cellWidth: number, cellHeight: number, pivotX: number, pivotY: number, anchorMode: WorkflowSettings["anchorMode"]) => Promise<boolean>;
   updateRuntimePolicy: (geometryPolicy: Project["runtime"]["geometryPolicy"], neutralHeightTarget: number | null, neutralTolerancePx: number) => Promise<void>;
   importUpscaledFrame: (sourceFrameId: string, path?: string) => Promise<boolean>;
@@ -162,12 +170,16 @@ async function poseBoardPreviews(project: Project, animationId: string) {
   const animation = project.animations.find(item => item.id === animationId);
   const boardId = animation?.activeBoardId;
   const review = animation?.extractions.slice().reverse().find(item => item.boardImportId === boardId);
-  const [poseBoardPreview, candidates, raw] = await Promise.all([
+  const pending = animation?.frameRecoveries.filter(item => !item.appliedAt && animation.activeRawFrameIds.includes(item.targetFrameId)) ?? [];
+  const [poseBoardPreview, candidates, raw, recoveries, sources, recoverySources] = await Promise.all([
     boardId ? desktop.poseBoardPreview(project.id, animationId, boardId) : null,
     review ? Promise.all(review.boxes.map(async box => [box.id, await desktop.extractionCandidate(project.id, animationId, review.id, box.id)] as const)) : [],
     animation ? Promise.all(animation.activeRawFrameIds.map(async id => [id, await desktop.rawAnimationFrame(project.id, animationId, id)] as const)) : [],
+    Promise.all(pending.map(async item => [item.id, await desktop.frameRecoveryPreview(project.id, animationId, item.id)] as const)),
+    animation ? Promise.all(animation.activeRawFrameIds.filter(id => animation.rawFrames.find(frame => frame.id === id)?.sourceKind === "standaloneReplacement").map(async id => [id, await desktop.frameSourcePreview(project.id, animationId, id)] as const)) : [],
+    Promise.all(pending.map(async item => [item.id, await desktop.frameRecoverySourcePreview(project.id, animationId, item.id)] as const)),
   ]);
-  return { poseBoardPreview, extractionCandidates: Object.fromEntries(candidates), rawFramePreviews: Object.fromEntries(raw) };
+  return { poseBoardPreview, extractionCandidates: Object.fromEntries(candidates), rawFramePreviews: Object.fromEntries(raw), frameRecoveryPreviews: Object.fromEntries(recoveries), frameSourcePreviews: Object.fromEntries(sources), frameRecoverySourcePreviews: Object.fromEntries(recoverySources) };
 }
 
 async function batchPreviews(project: Project, animationId: string) {
@@ -209,6 +221,9 @@ export const useStudio = create<StudioStore>((set, get) => ({
   poseBoardPreview: null,
   extractionCandidates: {},
   rawFramePreviews: {},
+  frameRecoveryPreviews: {},
+  frameSourcePreviews: {},
+  frameRecoverySourcePreviews: {},
   batchSnapPreviews: {},
   batchAutoFitPreviews: {},
   batchNormalizedPreviews: {},
@@ -762,17 +777,37 @@ export const useStudio = create<StudioStore>((set, get) => ({
     try { set({ project: await desktop.confirmNativeReview(project.id, id, acceptedFrameIds), busy: false }); }
     catch (error) { set({ busy: false, error: message(error) }); }
   },
-  replaceRawFrame: async (frameId, crop) => {
+  replaceRawFrame: async (frameId, mode, options, sourceReviewId) => {
     const project = get().project, id = get().selectedAnimationId;
     if (!project || !id || get().busy) return;
     try {
-      const path = crop ? null : await desktop.chooseImage();
-      if (!crop && typeof path !== "string") return;
+      const path = mode === "pick" ? await desktop.chooseImage() : null;
+      if (mode === "pick" && typeof path !== "string") return;
       set({ busy: true, error: null });
-      const updated = await desktop.replaceRawFrame(project.id, id, frameId, typeof path === "string" ? path : null, crop ?? null);
+      const updated = await desktop.replaceRawFrame(project.id, id, frameId, typeof path === "string" ? path : null, sourceReviewId ?? null, typeof mode === "object" ? mode : null, options);
+      set({ project: updated, busy: false });
+      const previews = await poseBoardPreviews(updated, id);
+      if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
+    } catch (error) { set({ busy: false, error: message(error) }); }
+  },
+  applyFrameRecovery: async (reviewId) => {
+    const project = get().project, id = get().selectedAnimationId;
+    if (!project || !id || get().busy) return;
+    set({ busy: true, error: null });
+    try {
+      const updated = await desktop.applyFrameRecovery(project.id, id, reviewId);
       set({ project: updated, batchSnapPreviews: {}, batchAutoFitPreviews: {}, batchCleanupFit: null, batchCleanedPreviews: {}, batchNormalizedPreviews: {}, upscaledPreviews: {}, framePreviews: {}, exportSheet: null, exportGif: null, exportManifest: null, busy: false });
       const previews = await poseBoardPreviews(updated, id);
       if (get().project?.id === project.id && get().selectedAnimationId === id) set(previews);
+    } catch (error) { set({ busy: false, error: message(error) }); }
+  },
+  analyzeBatchScale: async (options) => {
+    const project = get().project, id = get().selectedAnimationId;
+    if (!project || !id || get().busy) return;
+    set({ busy: true, error: null });
+    try {
+      const updated = await desktop.analyzeBatchScale(project.id, id, options);
+      set({ project: updated, busy: false });
     } catch (error) { set({ busy: false, error: message(error) }); }
   },
   runBatchSnap: async (options) => {
@@ -866,6 +901,16 @@ export const useStudio = create<StudioStore>((set, get) => ({
     set({ busy: true, error: null });
     try { set({ project: await desktop.updateWorkflow(project.id, workflow), busy: false }); }
     catch (error) { set({ busy: false, error: message(error) }); }
+  },
+  updateAnimationCleanupSettings: async (cleanupSettings) => {
+    const project = get().project, id = get().selectedAnimationId;
+    if (!project || !id || get().busy) return false;
+    set({ busy: true, error: null });
+    try {
+      const updated = await desktop.updateAnimationCleanupSettings(project.id, id, cleanupSettings);
+      set({ project: updated, busy: false, framePreviews: {}, batchCleanedPreviews: {}, batchNormalizedPreviews: {}, exportSheet: null, exportGif: null, exportManifest: null });
+      return true;
+    } catch (error) { set({ busy: false, error: message(error) }); return false; }
   },
   updateRuntime: async (cellWidth, cellHeight, pivotX, pivotY, anchorMode) => {
     const project = get().project;

@@ -1,8 +1,18 @@
 # Sprite Studio
 
+## Visual Effects
+
+Choose **Visual Effects** for independent VFX projects: original PNG/board imports, reviewed frame regions, full-origin fixed-cell processing that preserves detached particles, exact RGB/alpha checks, shared anchors, explicit tick holds, hit-stop study, owner approval and deterministic PNG/provenance exports. Custom dimensions are supported; Light Contact is an optional proposed study profile. Existing character and environment workflows remain separate. See the [VFX walkthrough and export contract](docs/vfx-workspace.md) and [verification](docs/vfx-verification.md). Real AI cleanup and desktop visual sign-off remain NOT TESTED.
+
+## Static environment assets
+
+Open an existing project and choose **Static environment** for independent Sunscorched Outback layers. This path preserves full 480×270 canvases and top-left origins, uses explicit non-destructive processing, validates actual PNG pixels, and requires review before export. It never invokes character normalization or changes animation stages.
+
+The preferred environment workflow is AI-generated original → Sprite Studio cleanup/pixel/palette review → approved PNG + manifest → later engine integration. Aseprite is optional; do not substitute independent geometric redraws for approved generated art. See [the static-layer guide](docs/static-environment-workflow.md) for operation, sidecar persistence/recovery, manifests, limits, and the synthetic test workspace.
+
 Created by [Afnan Khan (@2Cloud-S)](https://github.com/2Cloud-S).
 
-A local-first Windows desktop workbench for 2D character sprites. Milestones 1–3 create projects, preserve original anchors, recover the pixel grid, and review chroma cleanup/fixed-cell placement. Milestone 4 imports normalized animation frames, edits whole-pixel alignment with onion skin, and reviews timed playback. Milestone 5 creates deterministic draft spritesheets, GIF previews, and JSON manifests. The current milestone also imports pose boards, detects/curates raw poses, and reviews batch snap and cleanup/normalization. Image generation and a persistent queued job runner are not yet implemented.
+A local-first Windows desktop workbench for 2D character sprites and static environment assets. Milestones 1–3 create projects, preserve original anchors, recover the pixel grid, and review chroma cleanup/fixed-cell placement. Milestone 4 imports normalized animation frames, edits whole-pixel alignment with onion skin, and reviews timed playback. Milestone 5 creates deterministic draft spritesheets, GIF previews, and JSON manifests. The current milestone also imports pose boards, detects/curates raw poses, and reviews batch snap and cleanup/normalization. The dedicated Environment Assets workspace manages reusable packages, palettes, layer composition and validated PNG exports. Image generation and a persistent queued job runner are not yet implemented.
 
 ## Run
 
@@ -83,6 +93,12 @@ Runtime geometry can be **Flexible** or **Locked**, with an optional neutral-hei
 
 After applying cleanup for a single-image reference, **Export reference** copies the applied PNGs and a draft manifest to the selected project's `exports/references/` folder. The source images remain untouched. The sidebar's **Workspace** action opens the canonical selected workspace; **Change workspace** is a separate action. **Project exports** opens the selected project's `exports/` folder. Each completed reference or animation export also has an **Open export folder** action targeting that exact result. Older animation exports in `animations/<animation-uuid>/exports/` remain readable and openable.
 
+## Environment Assets
+
+Open **Environment Assets** in the sidebar for independent environment projects, reusable Custom/Outback packages, searchable asset libraries, explicit nearest-neighbor processing, palette profiles, revision review, layer compositing and validated single/package PNG exports. Original imports, metadata generations, approvals and exports are preserved. Environment operations do not reset character workflows or require a game-engine project.
+
+See the [Environment Assets walkthrough](docs/environment-assets-workspace.md) and [verification / manual desktop review](docs/environment-verification.md). Desktop screenshot sign-off remains **NOT TESTED** because native capture timed out. Run `npm test` for frontend interaction coverage.
+
 ## Animation and export
 
 Create an animation for a project source facing, then import ordered PNG frames that are already normalized to the project's fixed cell and binary alpha. Imported bytes are preserved. The alignment editor previews frame offsets, a prior-frame onion skin, pixel grid, pivot/baseline guides, and a real-time player; arrows move one pixel and Shift+arrows move five. Review and **Apply** write immutable offset and timing records, not changes to the source frames. Reimporting frames invalidates active alignment, preview, and export IDs.
@@ -102,14 +118,20 @@ Walk-cycle video curation is still external: select one complete cycle and impor
 | Step | Editable starting values | Required output/review |
 | --- | --- | --- |
 | Pose recovery | Auto chroma; tolerance 36; minimum area 64; merge gap 4 | Inspect complete poses and order before Apply; supported tolerance is 0–80 and merge gap 0–32. |
-| Per-frame snap | 16 colors; Auto pixel size; approved palette entries when available | Snap each crop independently; inspect native clusters, then Apply. |
+| Animation snap | 16 colors; Shared animation scale; approved palette entries when available | Analyze accepted raw frames, review their Auto estimates and recommended shared pitch, then snap every frame at one selected pitch. Per-frame Auto remains available for mixed-source material. Inspect native clusters and scale measurements before Apply. |
 | Chroma cleanup | Board chroma; tolerance 24; speckle area 2 | Binary alpha, no missing contour pixels; fixed project cell and pivot, no scaling. |
 | Alignment and playback | Whole-pixel offsets; 8 FPS study preview | Review loop seam and drift at native and nearest-neighbour sizes. |
 | Draft export | Up to 5 columns, zero padding/spacing as editable starting values. | Confirm sheet, GIF, and manifest together; exports remain `DRAFT` until reviewed for the target game. |
 
 For single-image references, snap starts at 16 colors and Auto pixel size, then cleanup starts with Auto chroma, tolerance 18, and speckle area 2. These are processing starting values, not guarantees or palette approval. The small recovered native image and its nearest-neighbour upscale serve different purposes; only the upscale is a downstream generation reference.
 
-Within an animation, detect chroma-separated components, reject/reorder candidates or add an exact-coordinate manual crop, then **Apply** to preserve raw crops. **Snap all** creates a separate review for every raw frame. **Apply snapped frames** makes that review the cleanup input. **Clean all** previews binary-alpha cutouts in fixed cells; **Apply normalized frames** appends immutable frames to the animation for alignment and export. A failed batch keeps the previously applied reviews and raw sources.
+Within an animation, detect chroma-separated components, reject/reorder candidates or add an exact-coordinate manual crop, then **Apply** to preserve raw crops. **Analyze frame scales** runs the installed snapper's Auto detection on every accepted crop and recommends a robust animation-level pixel pitch. Shared animation scale is the default; you can override the pitch or, in legacy KangiFight projects, lock it to a reference frame. **Snap all** uses the selected pitch on every frame and creates an immutable review. Per-frame Auto may produce a pitch warning. The post-snap Scale Consistency Review shows pitch, foreground size/area, and approximate upper/head and body-core occupied regions; pose extent alone is never a failure. **Apply snapped frames** makes that review the cleanup input. **Clean all** previews binary-alpha cutouts in fixed cells; **Apply normalized frames** appends immutable frames to the animation for alignment and export. Normalization is placement-only, with no crop or resize to make poses match. A failed batch keeps the previously applied reviews and raw sources.
+
+Background, tolerance, speckle area, and green-fringe cleanup are saved **per animation**. Editing them in Background Clean requires **Save cleanup settings**; only that animation's cleanup and dependent stages become stale. Accepted raw frames, snap reviews, old normalized files, alignment offsets, preview settings, and exports remain on disk for inspection. The project workflow's fringe checkbox is only a default for newly created animations.
+
+### Evidence-checked workspace reconciliation
+
+If older project metadata incorrectly marks completed animations stale, first copy the entire workspace and Tauri `app-settings.json`. Then run the read-only reconciliation preview with `cargo run --manifest-path src-tauri/Cargo.toml --bin reconcile_workspace -- "C:\absolute\path\to\project.json"`. The command checks stored hashes, normalized PNG dimensions, current snap/raw IDs, applied cleanup, alignment sidecar/offsets, timing, export manifest, sheet, and GIF. It refuses a chain with newer pending snap/cleanup work, missing or damaged files, or changed animation cleanup settings. To apply only verified recoveries, add `--apply`. It creates a separate pre-reconcile metadata backup beside `project.json`, preserves unknown project/animation JSON fields, and validates the result with Sprite Studio's project loader. It never regenerates art or silently approves a pending export review.
 
 Each snapped-frame thumbnail opens an individual review dialog with exact native dimensions, 1×/2×/4×/8× nearest-neighbour zoom, and previous/next navigation. The single-image anchor snap review has the same large-view option. Zoom affects only display, not saved pixels or Apply state.
 

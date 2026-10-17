@@ -314,6 +314,8 @@ pub struct Project {
     pub cleanup_reviews: Vec<CleanupReview>,
     #[serde(default)]
     pub animations: Vec<Animation>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -378,6 +380,49 @@ pub struct RawAnimationFrame {
     pub width: u32,
     pub height: u32,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub source_kind: FrameSourceKind,
+    #[serde(default)]
+    pub source_relative_path: Option<String>,
+    #[serde(default)]
+    pub source_sha256: Option<String>,
+    #[serde(default)]
+    pub source_width: Option<u32>,
+    #[serde(default)]
+    pub source_height: Option<u32>,
+    #[serde(default)]
+    pub source_crop: Option<ManualCrop>,
+    #[serde(default)]
+    pub background_hex: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FrameSourceKind {
+    #[default]
+    BoardCrop,
+    StandaloneReplacement,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameRecoveryReview {
+    pub id: String,
+    pub target_frame_id: String,
+    pub source_kind: FrameSourceKind,
+    pub source_relative_path: String,
+    pub source_sha256: String,
+    pub source_width: u32,
+    pub source_height: u32,
+    pub crop: ManualCrop,
+    pub foreground_width: u32,
+    pub foreground_height: u32,
+    pub foreground_pixels: u32,
+    pub background_hex: String,
+    pub candidate_relative_path: String,
+    pub candidate_sha256: String,
+    pub created_at: DateTime<Utc>,
+    pub applied_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -423,11 +468,77 @@ pub struct BatchSnapReview {
     #[serde(default)]
     pub detected_pixel_size: Option<f64>,
     #[serde(default)]
+    pub scale_mode: PixelScaleMode,
+    #[serde(default)]
+    pub scale_analysis_id: Option<String>,
+    #[serde(default)]
+    pub scale_reference_frame_id: Option<String>,
+    #[serde(default)]
+    pub scale_metrics: Vec<ScaleConsistencyMetric>,
+    #[serde(default)]
+    pub scale_inconsistency: bool,
+    #[serde(default)]
     pub auto_fit_run_id: Option<String>,
     pub palette: Option<String>,
     pub tool_version: String,
     pub created_at: DateTime<Utc>,
     pub applied_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PixelScaleMode {
+    #[default]
+    PerFrameAuto,
+    SharedAnimationScale,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScaleRegion {
+    pub width: u32,
+    pub height: u32,
+    pub area: u32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScaleConsistencyMetric {
+    pub source_frame_id: String,
+    pub foreground_width: u32,
+    pub foreground_height: u32,
+    pub foreground_area: u32,
+    pub detected_pixel_size: Option<f64>,
+    pub effective_pixel_size: Option<f64>,
+    pub head_region: Option<ScaleRegion>,
+    pub body_core_region: Option<ScaleRegion>,
+    pub pitch_differs: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScaleAnalysisFrame {
+    pub source_frame_id: String,
+    pub source_sha256: String,
+    pub estimated_pixel_size: f64,
+    pub rounded_pixel_size: u32,
+    pub native_relative_path: String,
+    pub native_sha256: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScaleAnalysis {
+    pub id: String,
+    pub extraction_id: String,
+    pub source_frame_ids: Vec<String>,
+    pub frames: Vec<ScaleAnalysisFrame>,
+    pub recommended_pixel_size: u32,
+    pub inconsistent_auto_pitch: bool,
+    pub colors: u16,
+    pub palette: Option<String>,
+    pub tool_version: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -510,7 +621,7 @@ pub struct ExtractionOptions {
     pub merge_gap: u8,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManualCrop {
     pub x: u32,
@@ -528,6 +639,10 @@ struct DetectedMetrics {
     height: u32,
     foreground_pixels: u32,
     filename: String,
+    #[serde(default)]
+    foreground_width: u32,
+    #[serde(default)]
+    foreground_height: u32,
 }
 
 #[derive(Deserialize)]
@@ -613,9 +728,13 @@ pub struct Animation {
     #[serde(default)]
     pub raw_frames: Vec<RawAnimationFrame>,
     #[serde(default)]
+    pub frame_recoveries: Vec<FrameRecoveryReview>,
+    #[serde(default)]
     pub active_raw_frame_ids: Vec<String>,
     #[serde(default)]
     pub batch_snaps: Vec<BatchSnapReview>,
+    #[serde(default)]
+    pub scale_analyses: Vec<ScaleAnalysis>,
     #[serde(default)]
     pub batch_auto_fit_runs: Vec<BatchAutoFitRun>,
     #[serde(default)]
@@ -629,6 +748,8 @@ pub struct Animation {
     #[serde(default)]
     pub batch_cleanups: Vec<BatchCleanupReview>,
     #[serde(default)]
+    pub cleanup_settings: Option<AnimationCleanupSettings>,
+    #[serde(default)]
     pub active_batch_cleanup_id: Option<String>,
     pub alignments: Vec<AlignmentReview>,
     pub previews: Vec<AnimationPreviewReview>,
@@ -641,6 +762,8 @@ pub struct Animation {
     pub stages: BTreeMap<String, StageState>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -653,10 +776,43 @@ pub struct SnapOptions {
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BatchSnapRequest {
+    pub colors: u16,
+    pub pixel_size: Option<u32>,
+    pub palette: Option<String>,
+    #[serde(default)]
+    pub scale_mode: Option<PixelScaleMode>,
+    #[serde(default)]
+    pub scale_analysis_id: Option<String>,
+    #[serde(default)]
+    pub scale_reference_frame_id: Option<String>,
+}
+
+impl BatchSnapRequest {
+    fn options(&self) -> SnapOptions {
+        SnapOptions {
+            colors: self.colors,
+            pixel_size: self.pixel_size,
+            palette: self.palette.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CleanupOptions {
     pub background: String,
     pub tolerance: u8,
     pub min_area: u32,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnimationCleanupSettings {
+    pub background: String,
+    pub tolerance: u8,
+    pub min_area: u32,
+    pub green_fringe_despeckle: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -753,6 +909,15 @@ fn settings_file(app: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(dir.join("app-settings.json"))
 }
 
+// Static assets share only project lookup/locking, never character stage mutation.
+pub(crate) fn environment_project_dir(app: &tauri::AppHandle, id: &str) -> Result<PathBuf> {
+    let settings = read_settings(&settings_file(app)?)?;
+    find_project(&settings, id).map(|(dir, _)| dir)
+}
+pub(crate) fn environment_workspace_root(app: &tauri::AppHandle) -> Result<PathBuf> {
+    workspace(&read_settings(&settings_file(app)?)?)
+}
+
 fn read_settings(path: &Path) -> Result<Settings> {
     if !path.exists() {
         return Ok(Settings::default());
@@ -762,6 +927,14 @@ fn read_settings(path: &Path) -> Result<Settings> {
 }
 
 fn atomic_json<T: Serialize>(target: &Path, value: &T) -> Result<()> {
+    atomic_json_with_precommit(target, value, || Ok(()))
+}
+
+fn atomic_json_with_precommit<T: Serialize, F: FnOnce() -> Result<()>>(
+    target: &Path,
+    value: &T,
+    precommit: F,
+) -> Result<()> {
     let parent = target.parent().ok_or("Invalid metadata path")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
@@ -775,6 +948,10 @@ fn atomic_json<T: Serialize>(target: &Path, value: &T) -> Result<()> {
         file.write_all(&bytes)
             .and_then(|_| file.sync_all())
             .map_err(|e| format!("Cannot write metadata: {e}"))?;
+    }
+    if let Err(error) = precommit() {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
     }
     if target.exists() {
         let backup = parent.join(format!(".{}.backup", Uuid::new_v4()));
@@ -845,7 +1022,7 @@ fn project_export_dir(project_dir: &Path, relative: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-fn open_folder(path: &Path) -> Result<()> {
+pub(crate) fn open_folder(path: &Path) -> Result<()> {
     let folder = fs::canonicalize(path).map_err(|e| format!("Folder is missing: {e}"))?;
     if !folder.is_dir() {
         return Err("Expected a folder".into());
@@ -1038,7 +1215,7 @@ fn preset_settings(preset: Preset) -> (RuntimeSettings, BTreeMap<String, AnchorA
     )
 }
 
-fn read_project(dir: &Path) -> Result<Project> {
+pub(crate) fn read_project(dir: &Path) -> Result<Project> {
     let bytes =
         fs::read(dir.join("project.json")).map_err(|e| format!("Cannot read project: {e}"))?;
     let mut project: Project =
@@ -1179,6 +1356,20 @@ fn read_project(dir: &Path) -> Result<Project> {
         }
         for frame in &animation.raw_frames {
             safe_relative(&frame.relative_path)?;
+            if let Some(path) = &frame.source_relative_path {
+                safe_relative(path)?;
+            }
+        }
+        for review in &animation.frame_recoveries {
+            safe_relative(&review.source_relative_path)?;
+            safe_relative(&review.candidate_relative_path)?;
+            if !animation
+                .raw_frames
+                .iter()
+                .any(|frame| frame.id == review.target_frame_id)
+            {
+                return Err("Frame recovery target is invalid".into());
+            }
         }
         for id in &animation.active_raw_frame_ids {
             if !animation.raw_frames.iter().any(|frame| {
@@ -1186,6 +1377,28 @@ fn read_project(dir: &Path) -> Result<Project> {
                     && Some(&frame.extraction_id) == animation.active_extraction_id.as_ref()
             }) {
                 return Err("Active raw frame reference is invalid".into());
+            }
+        }
+        for analysis in &animation.scale_analyses {
+            if !animation
+                .extractions
+                .iter()
+                .any(|item| item.id == analysis.extraction_id)
+                || analysis.frames.len() != analysis.source_frame_ids.len()
+                || analysis.recommended_pixel_size == 0
+            {
+                return Err("Scale analysis metadata is invalid".into());
+            }
+            for (id, frame) in analysis.source_frame_ids.iter().zip(&analysis.frames) {
+                safe_relative(&frame.native_relative_path)?;
+                if &frame.source_frame_id != id
+                    || !animation
+                        .raw_frames
+                        .iter()
+                        .any(|item| item.id == *id && item.sha256 == frame.source_sha256)
+                {
+                    return Err("Scale analysis source reference is invalid".into());
+                }
             }
         }
         for review in &animation.batch_snaps {
@@ -1214,6 +1427,15 @@ fn read_project(dir: &Path) -> Result<Project> {
                 {
                     return Err("Batch snap source frame reference is invalid".into());
                 }
+            }
+            if let Some(id) = &review.scale_analysis_id {
+                if !animation.scale_analyses.iter().any(|item| &item.id == id) {
+                    return Err("Batch snap scale analysis reference is invalid".into());
+                }
+            }
+            if !review.scale_metrics.is_empty() && review.scale_metrics.len() != review.frames.len()
+            {
+                return Err("Batch snap scale review is incomplete".into());
             }
         }
         if let Some(id) = &animation.active_batch_snap_id {
@@ -1424,9 +1646,26 @@ fn create_project_in(settings: &Settings, name: &str, preset: Preset) -> Result<
         auto_fit_runs: vec![],
         cleanup_reviews: vec![],
         animations: vec![],
+        extra: BTreeMap::new(),
     };
     atomic_json(&dir.join("project.json"), &project)?;
     Ok(project)
+}
+
+#[cfg(test)]
+pub(crate) fn create_static_demo_project(root: &Path) -> Result<(PathBuf, String)> {
+    fs::create_dir_all(root.join("projects")).map_err(|e| e.to_string())?;
+    let settings = Settings {
+        workspace_root: Some(root.to_string_lossy().into()),
+        ..Default::default()
+    };
+    let project = create_project_in(
+        &settings,
+        "Static Environment Synthetic QA",
+        Preset::Generic,
+    )?;
+    let (dir, _) = find_project(&settings, &project.id)?;
+    Ok((dir, project.id))
 }
 
 fn rename_project_in(settings: &Settings, project_id: &str, name: &str) -> Result<Project> {
@@ -1497,9 +1736,9 @@ fn update_workflow_in(
         project.runtime.pivot_y = project.runtime.cell_height.saturating_sub(1);
     }
     let mode_changed = workflow.upscale_mode != project.workflow.upscale_mode;
-    let cleaning_changed = workflow.green_fringe_despeckle
-        != project.workflow.green_fringe_despeckle
-        || recenter_pivot;
+    // Green fringe is an animation cleanup setting. The project value is only
+    // the default for animations that have not chosen their own setting.
+    let cleaning_changed = recenter_pivot;
     if mode_changed || cleaning_changed {
         for animation in &mut project.animations {
             if animation.active_batch_cleanup_id.is_some() && !animation.frames.is_empty() {
@@ -1844,6 +2083,97 @@ fn validated_cleanup_options(options: &CleanupOptions) -> Result<String> {
     Ok(background.to_ascii_lowercase())
 }
 
+fn effective_animation_cleanup_settings(
+    animation: &Animation,
+    workflow: &WorkflowSettings,
+) -> AnimationCleanupSettings {
+    if let Some(settings) = &animation.cleanup_settings {
+        return settings.clone();
+    }
+    if let Some(review) = animation.batch_cleanups.last() {
+        return AnimationCleanupSettings {
+            background: review.background_hex.clone(),
+            tolerance: review.tolerance,
+            min_area: review.min_area,
+            green_fringe_despeckle: review.green_fringe_despeckle,
+        };
+    }
+    AnimationCleanupSettings {
+        background: animation
+            .extractions
+            .iter()
+            .find(|review| Some(&review.id) == animation.active_extraction_id.as_ref())
+            .map(|review| review.background_hex.clone())
+            .unwrap_or_else(|| "auto".into()),
+        tolerance: 24,
+        min_area: 2,
+        green_fringe_despeckle: workflow.green_fringe_despeckle,
+    }
+}
+
+fn set_animation_cleanup_settings(
+    animation: &mut Animation,
+    workflow: &WorkflowSettings,
+    requested: AnimationCleanupSettings,
+) -> bool {
+    let previous = effective_animation_cleanup_settings(animation, workflow);
+    if previous == requested && animation.cleanup_settings.is_some() {
+        return false;
+    }
+    if previous != requested
+        && animation.active_batch_snap_id.is_some()
+        && !animation.batch_cleanups.is_empty()
+    {
+        if animation.active_batch_cleanup_id.is_some() && !animation.frames.is_empty() {
+            animation.historical_frames.append(&mut animation.frames);
+        }
+        animation.active_batch_cleanup_id = None;
+        animation.active_alignment_id = None;
+        animation.active_preview_id = None;
+        animation.active_export_id = None;
+        for stage in [
+            "cleanup",
+            "normalize",
+            "frames",
+            "align",
+            "preview",
+            "export",
+        ] {
+            if animation.stages.get(stage) != Some(&StageState::Waiting) {
+                animation.stages.insert(stage.into(), StageState::Stale);
+            }
+        }
+    }
+    animation.cleanup_settings = Some(requested);
+    animation.updated_at = Utc::now();
+    true
+}
+
+fn update_animation_cleanup_settings_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    mut requested: AnimationCleanupSettings,
+) -> Result<Project> {
+    requested.background = validated_cleanup_options(&CleanupOptions {
+        background: requested.background,
+        tolerance: requested.tolerance,
+        min_area: requested.min_area,
+    })?;
+    let (dir, mut project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter_mut()
+        .find(|item| item.id == animation_id)
+        .ok_or("Animation not found")?;
+    if !set_animation_cleanup_settings(animation, &project.workflow, requested) {
+        return Ok(project);
+    }
+    project.updated_at = animation.updated_at;
+    atomic_json(&dir.join("project.json"), &project)?;
+    Ok(project)
+}
+
 fn mark_cleanup_stages(project: &mut Project, source_id: &str, stage: StageState) -> Result<()> {
     let record = project
         .imports
@@ -1963,6 +2293,142 @@ fn snapper_pixel_size(stdout: &[u8]) -> Option<f64> {
             .ok()
             .filter(|size| size.is_finite() && *size >= 1.0)
     })
+}
+
+fn rounded_pitch(value: f64, source_limit: u32) -> Result<u32> {
+    if !value.is_finite() || value < 1.0 || value > source_limit as f64 + 0.5 {
+        return Err("Snapper reported an invalid pixel-size estimate".into());
+    }
+    Ok((value.round() as u32).clamp(1, source_limit))
+}
+
+fn recommended_shared_pitch(pitches: &[u32]) -> Result<u32> {
+    if pitches.is_empty() {
+        return Err("No frame pixel-size estimates are available".into());
+    }
+    let mut sorted = pitches.to_vec();
+    sorted.sort_unstable();
+    // The lower median keeps an even-sized tie deterministic without pushing a
+    // shared grid coarser than any frame's central estimate requires.
+    let median = sorted[(sorted.len() - 1) / 2];
+    let mut counts = BTreeMap::<u32, usize>::new();
+    for pitch in pitches {
+        *counts.entry(*pitch).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by(|(a_pitch, a_count), (b_pitch, b_count)| {
+            a_count
+                .cmp(b_count)
+                .then_with(|| b_pitch.abs_diff(median).cmp(&a_pitch.abs_diff(median)))
+                .then_with(|| b_pitch.cmp(a_pitch))
+        })
+        .map(|(pitch, _)| pitch)
+        .ok_or("No shared pixel size could be recommended".into())
+}
+
+fn pitch_is_outlier(value: f64, center: f64) -> bool {
+    center >= 1.0 && (value - center).abs() >= 1.0 && (value - center).abs() / center >= 0.10
+}
+
+fn scale_region(
+    points: &[(u32, u32)],
+    min_x: u32,
+    max_x: u32,
+    min_y: u32,
+    max_y: u32,
+) -> Option<ScaleRegion> {
+    let mut x0 = u32::MAX;
+    let mut x1 = 0;
+    let mut y0 = u32::MAX;
+    let mut y1 = 0;
+    let mut area = 0;
+    for &(x, y) in points {
+        if x < min_x || x > max_x || y < min_y || y > max_y {
+            continue;
+        }
+        x0 = x0.min(x);
+        x1 = x1.max(x);
+        y0 = y0.min(y);
+        y1 = y1.max(y);
+        area += 1;
+    }
+    (area >= 4).then_some(ScaleRegion {
+        width: x1.saturating_sub(x0) + 1,
+        height: y1.saturating_sub(y0) + 1,
+        area,
+    })
+}
+
+fn scale_metric_from_png(
+    source_frame_id: &str,
+    bytes: &[u8],
+    background_hex: Option<&str>,
+    detected: Option<f64>,
+    effective: Option<f64>,
+) -> Result<ScaleConsistencyMetric> {
+    let image = image::load_from_memory_with_format(bytes, ImageFormat::Png)
+        .map_err(|_| "Snapped frame is damaged during scale review".to_string())?
+        .to_rgba8();
+    let background = background_hex
+        .and_then(|hex| {
+            let hex = hex.trim().trim_start_matches('#');
+            (hex.len() == 6)
+                .then(|| {
+                    let channels: Option<Vec<u8>> = (0..6)
+                        .step_by(2)
+                        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+                        .collect();
+                    channels.map(|parts| [parts[0], parts[1], parts[2]])
+                })
+                .flatten()
+        })
+        .unwrap_or_else(|| {
+            let color = image.get_pixel(0, 0).0;
+            [color[0], color[1], color[2]]
+        });
+    let points: Vec<(u32, u32)> = image
+        .enumerate_pixels()
+        .filter_map(|(x, y, color)| {
+            if color.0[3] < 128 {
+                return None;
+            }
+            let distance: i32 = (0..3)
+                .map(|i| (color.0[i] as i32 - background[i] as i32).pow(2))
+                .sum();
+            (distance > 24 * 24).then_some((x, y))
+        })
+        .collect();
+    let mut metric = ScaleConsistencyMetric {
+        source_frame_id: source_frame_id.into(),
+        foreground_width: 0,
+        foreground_height: 0,
+        foreground_area: points.len() as u32,
+        detected_pixel_size: detected,
+        effective_pixel_size: effective,
+        head_region: None,
+        body_core_region: None,
+        pitch_differs: false,
+    };
+    if points.is_empty() {
+        return Ok(metric);
+    }
+    let x0 = points.iter().map(|p| p.0).min().unwrap();
+    let x1 = points.iter().map(|p| p.0).max().unwrap();
+    let y0 = points.iter().map(|p| p.1).min().unwrap();
+    let y1 = points.iter().map(|p| p.1).max().unwrap();
+    metric.foreground_width = x1 - x0 + 1;
+    metric.foreground_height = y1 - y0 + 1;
+    // These are deliberately labelled heuristic regions: an arbitrary pose does not
+    // reveal anatomical landmarks reliably, so they are visual aids, not pass/fail gates.
+    let head_end = y0 + metric.foreground_height * 35 / 100;
+    let core_start = y0 + metric.foreground_height * 35 / 100;
+    let core_end = y0 + metric.foreground_height * 80 / 100;
+    let core_left = x0 + metric.foreground_width * 20 / 100;
+    let core_right = x0 + metric.foreground_width * 80 / 100;
+    metric.head_region = scale_region(&points, x0, x1, y0, head_end);
+    metric.body_core_region = scale_region(&points, core_left, core_right, core_start, core_end);
+    Ok(metric)
 }
 
 fn snap_placement(runtime: &RuntimeSettings, width: u32, height: u32) -> (i32, i32, bool) {
@@ -2949,14 +3415,22 @@ fn create_animation_in(
         extractions: vec![],
         active_extraction_id: None,
         raw_frames: vec![],
+        frame_recoveries: vec![],
         active_raw_frame_ids: vec![],
         batch_snaps: vec![],
+        scale_analyses: vec![],
         batch_auto_fit_runs: vec![],
         active_batch_snap_id: None,
         upscaled_frames: vec![],
         active_upscaled_frame_ids: BTreeMap::new(),
         upscale_approved: false,
         batch_cleanups: vec![],
+        cleanup_settings: Some(AnimationCleanupSettings {
+            background: "auto".into(),
+            tolerance: 24,
+            min_area: 2,
+            green_fringe_despeckle: project.workflow.green_fringe_despeckle,
+        }),
         active_batch_cleanup_id: None,
         alignments: vec![],
         previews: vec![],
@@ -2967,6 +3441,7 @@ fn create_animation_in(
         stages,
         created_at: now,
         updated_at: now,
+        extra: BTreeMap::new(),
     });
     project.updated_at = now;
     atomic_json(&dir.join("project.json"), &project)?;
@@ -3406,7 +3881,17 @@ fn apply_extraction_in(
     for id in &ordered_box_ids {
         let item = review.boxes.iter().find(|item| &item.id == id).unwrap();
         let (_, bytes) = verified_asset(&dir, &item.relative_path, &item.sha256)?;
-        choices.push((bytes, item.width, item.height));
+        choices.push((
+            bytes,
+            item.width,
+            item.height,
+            ManualCrop {
+                x: item.x,
+                y: item.y,
+                width: item.width,
+                height: item.height,
+            },
+        ));
     }
     for crop in &manual_crops {
         let mut cursor = Cursor::new(Vec::new());
@@ -3416,9 +3901,9 @@ fn apply_extraction_in(
             .crop_imm(crop.x, crop.y, crop.width, crop.height)
             .write_to(&mut cursor, ImageFormat::Png)
             .map_err(|e| format!("Cannot save manual crop: {e}"))?;
-        choices.push((cursor.into_inner(), crop.width, crop.height));
+        choices.push((cursor.into_inner(), crop.width, crop.height, crop.clone()));
     }
-    for (index, (bytes, width, height)) in choices.into_iter().enumerate() {
+    for (index, (bytes, width, height, source_crop)) in choices.into_iter().enumerate() {
         let id = Uuid::new_v4().to_string();
         let relative = format!(
             "animations/{animation_id}/frames_raw/frame_{:03}-{id}.png",
@@ -3451,6 +3936,13 @@ fn apply_extraction_in(
             width,
             height,
             created_at: Utc::now(),
+            source_kind: FrameSourceKind::BoardCrop,
+            source_relative_path: Some(board.relative_path.clone()),
+            source_sha256: Some(board.sha256.clone()),
+            source_width: Some(board.width),
+            source_height: Some(board.height),
+            source_crop: Some(source_crop),
+            background_hex: Some(review.background_hex.clone()),
         });
     }
     let animation = project
@@ -3526,11 +4018,163 @@ fn raw_animation_frame_preview_in(
     })
 }
 
+fn analyze_batch_scale_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    options: SnapOptions,
+) -> Result<Project> {
+    if options.pixel_size.is_some() {
+        return Err("Scale analysis requires Auto pixel size".into());
+    }
+    let (dir, mut project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter()
+        .find(|item| item.id == animation_id)
+        .ok_or("Animation not found")?;
+    if animation.stages.get("native_review") == Some(&StageState::Review) {
+        return Err("Confirm Native Review before analyzing pixel scale".into());
+    }
+    let extraction_id = animation
+        .active_extraction_id
+        .clone()
+        .ok_or("Apply pose extraction first")?;
+    let sources: Vec<_> = animation
+        .active_raw_frame_ids
+        .iter()
+        .map(|id| {
+            animation
+                .raw_frames
+                .iter()
+                .find(|item| &item.id == id)
+                .cloned()
+                .ok_or("Raw frame is missing".to_string())
+        })
+        .collect::<Result<_>>()?;
+    if sources.is_empty() || sources.len() > 64 {
+        return Err("Scale analysis requires 1–64 accepted raw frames".into());
+    }
+    let smallest = sources
+        .iter()
+        .map(|item| item.width.min(item.height))
+        .min()
+        .unwrap();
+    let palette = validated_snap_options(&options, smallest, smallest)?;
+    let executable = fs::canonicalize(
+        settings
+            .snapper_executable
+            .as_ref()
+            .ok_or("Locate the Sprite Fusion CLI first")?,
+    )
+    .map_err(|_| "Configured Sprite Fusion CLI is missing".to_string())?;
+    let version = inspect_snapper(&executable)?;
+    let id = Uuid::new_v4().to_string();
+    let relative_dir = format!("animations/{animation_id}/scale_analysis/{id}");
+    let output_dir = dir.join(&relative_dir);
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Cannot create scale analysis folder: {e}"))?;
+    let mut frames = Vec::with_capacity(sources.len());
+    for (index, source) in sources.iter().enumerate() {
+        let (source_path, _) = verified_asset(&dir, &source.relative_path, &source.sha256)?;
+        let native_relative_path = format!("{relative_dir}/frame_{:03}-auto.png", index + 1);
+        let output = Command::new(&executable)
+            .arg(source_path)
+            .arg(dir.join(&native_relative_path))
+            .arg(options.colors.to_string())
+            .args(
+                palette
+                    .as_ref()
+                    .map(|value| vec!["--palette", value.as_str()])
+                    .unwrap_or_default(),
+            )
+            .output()
+            .map_err(|e| format!("Scale analysis could not run on frame {}: {e}", index + 1))?;
+        if !output.status.success() {
+            return Err(format!(
+                "Scale analysis failed on frame {}: {}",
+                index + 1,
+                String::from_utf8_lossy(&output.stderr)
+                    .trim()
+                    .chars()
+                    .take(400)
+                    .collect::<String>()
+            ));
+        }
+        let estimate = snapper_pixel_size(&output.stdout).ok_or_else(|| {
+            format!(
+                "Snapper did not report a pixel-size estimate for frame {}",
+                index + 1
+            )
+        })?;
+        let rounded = rounded_pitch(estimate, source.width.min(source.height))?;
+        let bytes = fs::read(dir.join(&native_relative_path))
+            .map_err(|e| format!("Scale analysis output missing: {e}"))?;
+        if bytes.len() > MAX_IMPORT_BYTES as usize
+            || image::guess_format(&bytes).ok() != Some(ImageFormat::Png)
+        {
+            return Err(format!(
+                "Scale analysis frame {} is not a valid PNG",
+                index + 1
+            ));
+        }
+        frames.push(ScaleAnalysisFrame {
+            source_frame_id: source.id.clone(),
+            source_sha256: source.sha256.clone(),
+            estimated_pixel_size: estimate,
+            rounded_pixel_size: rounded,
+            native_relative_path,
+            native_sha256: format!("{:x}", Sha256::digest(&bytes)),
+        });
+    }
+    let recommendation = recommended_shared_pitch(
+        &frames
+            .iter()
+            .map(|frame| frame.rounded_pixel_size)
+            .collect::<Vec<_>>(),
+    )?;
+    let inconsistent = frames
+        .iter()
+        .any(|frame| pitch_is_outlier(frame.estimated_pixel_size, recommendation as f64));
+    let analysis = ScaleAnalysis {
+        id,
+        extraction_id,
+        source_frame_ids: sources.iter().map(|frame| frame.id.clone()).collect(),
+        frames,
+        recommended_pixel_size: recommendation,
+        inconsistent_auto_pitch: inconsistent,
+        colors: options.colors,
+        palette,
+        tool_version: version,
+        created_at: Utc::now(),
+    };
+    let animation = project
+        .animations
+        .iter_mut()
+        .find(|item| item.id == animation_id)
+        .unwrap();
+    animation.scale_analyses.push(analysis);
+    animation.updated_at = Utc::now();
+    project.updated_at = animation.updated_at;
+    atomic_json(&dir.join("project.json"), &project)?;
+    Ok(project)
+}
+
 fn run_batch_snap_in(
     settings: &Settings,
     project_id: &str,
     animation_id: &str,
     options: SnapOptions,
+) -> Result<Project> {
+    run_batch_snap_with_scale_in(settings, project_id, animation_id, options, None)
+}
+
+fn run_batch_snap_with_scale_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    options: SnapOptions,
+    selection: Option<(PixelScaleMode, Option<String>, Option<String>)>,
 ) -> Result<Project> {
     let (dir, mut project) = find_project(settings, project_id)?;
     let animation = project
@@ -3566,11 +4210,83 @@ fn run_batch_snap_in(
         .min()
         .unwrap();
     let palette = validated_snap_options(&options, smallest, smallest)?;
-    // KangiFight's 64px neutral figure is a grid-recovery target, not a scaling step.
-    // One shared override keeps all frames on the same recovered pixel grid.
-    let effective_pixel_size = if options.pixel_size.is_none()
-        && project.preset == Preset::KangiFight
+    let explicit_selection = selection.is_some();
+    let legacy_mode = if options.pixel_size.is_some() || project.preset == Preset::KangiFight {
+        PixelScaleMode::SharedAnimationScale
+    } else {
+        PixelScaleMode::PerFrameAuto
+    };
+    let (scale_mode, scale_analysis_id, scale_reference_frame_id) =
+        selection.unwrap_or((legacy_mode, None, None));
+    let analysis = if let Some(id) = &scale_analysis_id {
+        let item = animation
+            .scale_analyses
+            .iter()
+            .find(|item| &item.id == id)
+            .ok_or("Scale analysis is missing; analyze the accepted frames again")?;
+        if item.extraction_id != extraction_id
+            || item.source_frame_ids
+                != sources
+                    .iter()
+                    .map(|source| source.id.clone())
+                    .collect::<Vec<_>>()
+            || item
+                .frames
+                .iter()
+                .zip(&sources)
+                .any(|(estimate, source)| estimate.source_sha256 != source.sha256)
+            || item.colors != options.colors
+            || item.palette != palette
+        {
+            return Err(
+                "Scale analysis is stale; analyze the current frames and snap settings again"
+                    .into(),
+            );
+        }
+        Some(item.clone())
+    } else {
+        None
+    };
+    let effective_pixel_size = if explicit_selection
+        && scale_mode == PixelScaleMode::SharedAnimationScale
     {
+        let analysis = analysis
+            .as_ref()
+            .ok_or("Analyze the accepted raw frames before Shared animation scale")?;
+        if options.pixel_size.is_some() && scale_reference_frame_id.is_some() {
+            return Err("Choose a manual shared size or a reference frame, not both".into());
+        }
+        let reference_size = scale_reference_frame_id
+            .as_ref()
+            .map(|id| {
+                analysis
+                    .frames
+                    .iter()
+                    .find(|frame| &frame.source_frame_id == id)
+                    .map(|frame| frame.rounded_pixel_size)
+                    .ok_or("Scale reference frame is not in the current analysis")
+            })
+            .transpose()?;
+        let selected = options
+            .pixel_size
+            .or(reference_size)
+            .unwrap_or(analysis.recommended_pixel_size);
+        if selected == 0 || selected > smallest {
+            return Err(
+                "Selected shared pixel size is outside the accepted frames' source dimensions"
+                    .into(),
+            );
+        }
+        Some(selected)
+    } else if explicit_selection {
+        if options.pixel_size.is_some() || scale_reference_frame_id.is_some() {
+            return Err(
+                "Per-frame Auto does not accept a shared pixel size or reference frame".into(),
+            );
+        }
+        None
+    } else if options.pixel_size.is_none() && project.preset == Preset::KangiFight {
+        // Preserve legacy KangiFight auto behaviour for old callers and auto-fit retries.
         let target = project
             .runtime
             .neutral_height_target
@@ -3592,6 +4308,11 @@ fn run_batch_snap_in(
     )
     .map_err(|_| "Configured Sprite Fusion CLI is missing".to_string())?;
     let version = inspect_snapper(&executable)?;
+    let extraction_background = animation
+        .extractions
+        .iter()
+        .find(|item| item.id == extraction_id)
+        .map(|item| item.background_hex.clone());
     let id = Uuid::new_v4().to_string();
     let relative_dir = format!("animations/{animation_id}/frames_snapped/{id}");
     let review_dir = dir.join(&relative_dir);
@@ -3610,6 +4331,7 @@ fn run_batch_snap_in(
     atomic_json(&dir.join("project.json"), &project)?;
     let result = (|| -> Result<BatchSnapReview> {
         let mut frames = Vec::with_capacity(sources.len());
+        let mut scale_metrics = Vec::with_capacity(sources.len());
         let mut detected_pixel_size = None;
         for (index, source) in sources.iter().enumerate() {
             let output_relative = format!("{relative_dir}/frame_{:03}-native.png", index + 1);
@@ -3639,8 +4361,9 @@ fn run_batch_snap_in(
                         .collect::<String>()
                 ));
             }
+            let reported_size = snapper_pixel_size(&output.stdout);
             if detected_pixel_size.is_none() {
-                detected_pixel_size = snapper_pixel_size(&output.stdout);
+                detected_pixel_size = reported_size;
             }
             let bytes = fs::read(&output_path)
                 .map_err(|e| format!("Frame {} snap output missing: {e}", index + 1))?;
@@ -3661,6 +4384,22 @@ fn run_batch_snap_in(
             {
                 return Err(format!("Frame {} recovered grid is too large", index + 1));
             }
+            let estimated = analysis
+                .as_ref()
+                .and_then(|item| item.frames.get(index))
+                .map(|item| item.estimated_pixel_size)
+                .or(reported_size);
+            let effective = effective_pixel_size.map(f64::from).or(reported_size);
+            scale_metrics.push(scale_metric_from_png(
+                &source.id,
+                &bytes,
+                source
+                    .background_hex
+                    .as_deref()
+                    .or(extraction_background.as_deref()),
+                estimated,
+                effective,
+            )?);
             frames.push(BatchFrameArtifact {
                 source_frame_id: source.id.clone(),
                 relative_path: output_relative,
@@ -3678,6 +4417,25 @@ fn run_batch_snap_in(
                 }),
             });
         }
+        let scale_inconsistency = if scale_mode == PixelScaleMode::PerFrameAuto {
+            let pitches: Vec<_> = scale_metrics
+                .iter()
+                .filter_map(|item| item.effective_pixel_size)
+                .collect();
+            if pitches.len() >= 2 {
+                let mut sorted = pitches;
+                sorted.sort_by(f64::total_cmp);
+                let center = sorted[sorted.len() / 2];
+                for item in &mut scale_metrics {
+                    item.pitch_differs = item
+                        .effective_pixel_size
+                        .is_some_and(|value| pitch_is_outlier(value, center));
+                }
+            }
+            scale_metrics.iter().any(|item| item.pitch_differs)
+        } else {
+            false
+        };
         Ok(BatchSnapReview {
             id,
             extraction_id,
@@ -3686,6 +4444,11 @@ fn run_batch_snap_in(
             colors: options.colors,
             pixel_size: effective_pixel_size,
             detected_pixel_size,
+            scale_mode,
+            scale_analysis_id,
+            scale_reference_frame_id,
+            scale_metrics,
+            scale_inconsistency,
             auto_fit_run_id: None,
             palette,
             tool_version: version,
@@ -3800,7 +4563,8 @@ fn run_batch_auto_fit_in(
     .map_err(|_| "Configured Sprite Fusion CLI is missing; locate it again".to_string())?;
     inspect_snapper(&snapper)?;
     let runtime = project.runtime.clone();
-    let fringe_cleanup = project.workflow.green_fringe_despeckle;
+    let fringe_cleanup =
+        effective_animation_cleanup_settings(animation, &project.workflow).green_fringe_despeckle;
     let colors = active.colors;
     let palette = active.palette.clone();
     let initial_override = active.pixel_size;
@@ -4046,16 +4810,19 @@ fn confirm_native_review_in(
     Ok(project)
 }
 
-fn replace_raw_frame_in(
+fn propose_frame_recovery_in(
     settings: &Settings,
     project_id: &str,
     animation_id: &str,
     frame_id: &str,
     source_path: Option<&str>,
+    source_review_id: Option<&str>,
     crop: Option<ManualCrop>,
+    options: ExtractionOptions,
 ) -> Result<Project> {
-    if source_path.is_some() == crop.is_some() {
-        return Err("Choose either a replacement image or board crop".into());
+    let background = validate_extraction_options(&options)?;
+    if source_path.is_some() && (crop.is_some() || source_review_id.is_some()) {
+        return Err("Choose a replacement image or an existing source, not both".into());
     }
     let (dir, mut project) = find_project(settings, project_id)?;
     let animation = project
@@ -4063,21 +4830,28 @@ fn replace_raw_frame_in(
         .iter()
         .find(|a| a.id == animation_id)
         .ok_or("Animation not found")?;
-    let index = animation
+    if !animation
         .active_raw_frame_ids
         .iter()
-        .position(|id| id == frame_id)
-        .ok_or("Frame is not active in Native Review")?;
+        .any(|id| id == frame_id)
+    {
+        return Err("Frame is not active in Native Review".into());
+    }
     let old = animation
         .raw_frames
         .iter()
         .find(|f| f.id == frame_id)
         .ok_or("Recovered frame is missing")?;
-    let extraction_id = old.extraction_id.clone();
-    let bytes = if let Some(path) = source_path {
-        let source =
+    let board = animation
+        .boards
+        .iter()
+        .find(|b| Some(&b.id) == animation.active_board_id.as_ref());
+    let (source_kind, relative, hash, source_width, source_height) = if let Some(path) = source_path
+    {
+        let external =
             fs::canonicalize(path).map_err(|e| format!("Replacement image missing: {e}"))?;
-        let data = fs::read(&source).map_err(|e| format!("Cannot read replacement image: {e}"))?;
+        let data =
+            fs::read(&external).map_err(|e| format!("Cannot read replacement image: {e}"))?;
         if data.len() > MAX_IMPORT_BYTES as usize {
             return Err("Replacement image exceeds 32 MB".into());
         }
@@ -4088,46 +4862,244 @@ fn replace_raw_frame_in(
         }
         let image = image::load_from_memory_with_format(&data, format)
             .map_err(|_| "Replacement image is damaged".to_string())?;
-        let mut cursor = Cursor::new(Vec::new());
-        image
-            .write_to(&mut cursor, ImageFormat::Png)
-            .map_err(|e| format!("Cannot encode replacement PNG: {e}"))?;
-        cursor.into_inner()
-    } else {
-        let crop = crop.unwrap();
-        let board = animation
-            .boards
-            .iter()
-            .find(|b| Some(&b.id) == animation.active_board_id.as_ref())
-            .ok_or("Active pose board is missing")?;
-        if crop.width == 0
-            || crop.height == 0
-            || crop
-                .x
-                .checked_add(crop.width)
-                .is_none_or(|x| x > board.width)
-            || crop
-                .y
-                .checked_add(crop.height)
-                .is_none_or(|y| y > board.height)
+        if image.width() == 0
+            || image.height() == 0
+            || image.width() > 4096
+            || image.height() > 4096
         {
-            return Err("Re-crop bounds are outside the pose board".into());
+            return Err("Replacement image must be 1–4096 pixels on each axis".into());
         }
-        let (_, data) = verified_asset(&dir, &board.relative_path, &board.sha256)?;
-        let image =
-            image::load_from_memory(&data).map_err(|_| "Pose board is damaged".to_string())?;
-        let mut cursor = Cursor::new(Vec::new());
-        image
-            .crop_imm(crop.x, crop.y, crop.width, crop.height)
-            .write_to(&mut cursor, ImageFormat::Png)
-            .map_err(|e| format!("Cannot encode re-crop: {e}"))?;
-        cursor.into_inner()
+        let extension = if format == ImageFormat::Png {
+            "png"
+        } else {
+            "jpg"
+        };
+        let relative = format!(
+            "animations/{animation_id}/replacements/{}.{}",
+            Uuid::new_v4(),
+            extension
+        );
+        let destination = dir.join(&relative);
+        fs::create_dir_all(destination.parent().unwrap())
+            .map_err(|e| format!("Cannot create replacement folder: {e}"))?;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .and_then(|mut file| {
+                file.write_all(&data)?;
+                file.sync_all()
+            })
+            .map_err(|e| format!("Cannot preserve replacement source: {e}"))?;
+        (
+            FrameSourceKind::StandaloneReplacement,
+            relative,
+            format!("{:x}", Sha256::digest(&data)),
+            image.width(),
+            image.height(),
+        )
+    } else if let Some(review_id) = source_review_id {
+        let prior = animation
+            .frame_recoveries
+            .iter()
+            .find(|r| r.id == review_id && r.target_frame_id == frame_id)
+            .ok_or("Pending frame recovery source is missing")?;
+        (
+            prior.source_kind,
+            prior.source_relative_path.clone(),
+            prior.source_sha256.clone(),
+            prior.source_width,
+            prior.source_height,
+        )
+    } else if let (Some(relative), Some(hash), Some(width), Some(height)) = (
+        &old.source_relative_path,
+        &old.source_sha256,
+        old.source_width,
+        old.source_height,
+    ) {
+        (
+            old.source_kind,
+            relative.clone(),
+            hash.clone(),
+            width,
+            height,
+        )
+    } else {
+        let board = board.ok_or("Active pose board is missing")?;
+        (
+            FrameSourceKind::BoardCrop,
+            board.relative_path.clone(),
+            board.sha256.clone(),
+            board.width,
+            board.height,
+        )
     };
-    let image = image::load_from_memory_with_format(&bytes, ImageFormat::Png)
-        .map_err(|_| "Recovered image is damaged".to_string())?;
-    if image.width() == 0 || image.height() == 0 || image.width() > 4096 || image.height() > 4096 {
-        return Err("Recovered frame must be 1–4096 pixels on each axis".into());
+    if let Some(rect) = &crop {
+        if rect.width == 0
+            || rect.height == 0
+            || rect
+                .x
+                .checked_add(rect.width)
+                .is_none_or(|v| v > source_width)
+            || rect
+                .y
+                .checked_add(rect.height)
+                .is_none_or(|v| v > source_height)
+        {
+            return Err("Manual crop is outside the active source image".into());
+        }
     }
+    let (source, _) = verified_asset(&dir, &relative, &hash)?;
+    let executable = settings
+        .python_executable
+        .as_ref()
+        .ok_or("Locate Python with Pillow and OpenCV first")?;
+    let executable = fs::canonicalize(executable)
+        .map_err(|_| "Configured Python is missing; locate it again".to_string())?;
+    inspect_python(&executable)?;
+    let id = Uuid::new_v4().to_string();
+    let review_relative = format!("animations/{animation_id}/frame_recoveries/{id}");
+    let output_dir = dir.join(&review_relative);
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Cannot create frame recovery review: {e}"))?;
+    let mut command = Command::new(&executable);
+    command
+        .args(["-I", "-c", EXTRACT_SCRIPT])
+        .arg(source)
+        .arg(&output_dir)
+        .arg(&background)
+        .arg(options.tolerance.to_string())
+        .arg(options.min_area.to_string())
+        .arg(options.merge_gap.to_string());
+    if let Some(rect) = &crop {
+        command
+            .arg("--manual")
+            .arg(rect.x.to_string())
+            .arg(rect.y.to_string())
+            .arg(rect.width.to_string())
+            .arg(rect.height.to_string());
+    } else {
+        command.arg("--single");
+    }
+    let output = command
+        .output()
+        .map_err(|e| format!("Frame recovery processor could not run: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Frame recovery failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+                .trim()
+                .chars()
+                .take(500)
+                .collect::<String>()
+        ));
+    }
+    let metrics: ExtractionMetrics = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "Frame recovery returned invalid coordinates".to_string())?;
+    if metrics.boxes.len() != 1 {
+        return Err("Frame recovery must produce exactly one pose".into());
+    }
+    let box_item = &metrics.boxes[0];
+    if box_item.filename != "candidate-00.png"
+        || box_item.width == 0
+        || box_item.height == 0
+        || box_item.foreground_pixels == 0
+        || box_item
+            .x
+            .checked_add(box_item.width)
+            .is_none_or(|v| v > source_width)
+        || box_item
+            .y
+            .checked_add(box_item.height)
+            .is_none_or(|v| v > source_height)
+    {
+        return Err("Frame recovery produced an out-of-bounds crop".into());
+    }
+    let candidate_relative = format!("{review_relative}/candidate-00.png");
+    let candidate_sha256 =
+        checked_raw_png(&dir, &candidate_relative, box_item.width, box_item.height)?;
+    let review = FrameRecoveryReview {
+        id,
+        target_frame_id: frame_id.to_string(),
+        source_kind,
+        source_relative_path: relative,
+        source_sha256: hash,
+        source_width,
+        source_height,
+        crop: ManualCrop {
+            x: box_item.x,
+            y: box_item.y,
+            width: box_item.width,
+            height: box_item.height,
+        },
+        foreground_width: box_item.foreground_width,
+        foreground_height: box_item.foreground_height,
+        foreground_pixels: box_item.foreground_pixels,
+        background_hex: metrics.background_hex,
+        candidate_relative_path: candidate_relative,
+        candidate_sha256,
+        created_at: Utc::now(),
+        applied_at: None,
+    };
+    let animation = project
+        .animations
+        .iter_mut()
+        .find(|a| a.id == animation_id)
+        .unwrap();
+    animation.frame_recoveries.push(review);
+    animation.updated_at = Utc::now();
+    project.updated_at = animation.updated_at;
+    atomic_json(&dir.join("project.json"), &project)?;
+    Ok(project)
+}
+
+fn apply_frame_recovery_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    review_id: &str,
+) -> Result<Project> {
+    let (dir, mut project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter()
+        .find(|a| a.id == animation_id)
+        .ok_or("Animation not found")?;
+    let review = animation
+        .frame_recoveries
+        .iter()
+        .find(|r| r.id == review_id)
+        .ok_or("Frame recovery review not found")?
+        .clone();
+    if review.applied_at.is_some() {
+        return Err("Frame recovery was already applied".into());
+    }
+    if animation
+        .frame_recoveries
+        .iter()
+        .rev()
+        .find(|r| r.target_frame_id == review.target_frame_id)
+        .map(|r| r.id.as_str())
+        != Some(review_id)
+    {
+        return Err("A newer recovery review exists for this frame".into());
+    }
+    let index = animation
+        .active_raw_frame_ids
+        .iter()
+        .position(|id| id == &review.target_frame_id)
+        .ok_or("Frame changed since this recovery review; run recovery again")?;
+    let old = animation
+        .raw_frames
+        .iter()
+        .find(|f| f.id == review.target_frame_id)
+        .ok_or("Original raw frame is missing")?;
+    verified_asset(&dir, &review.source_relative_path, &review.source_sha256)?;
+    let (_, bytes) = verified_asset(
+        &dir,
+        &review.candidate_relative_path,
+        &review.candidate_sha256,
+    )?;
     let id = Uuid::new_v4().to_string();
     let relative = format!(
         "animations/{animation_id}/frames_raw/frame_{:03}-{id}.png",
@@ -4136,12 +5108,6 @@ fn replace_raw_frame_in(
     let destination = dir.join(&relative);
     fs::create_dir_all(destination.parent().unwrap())
         .map_err(|e| format!("Cannot create raw frame folder: {e}"))?;
-    if !fs::canonicalize(destination.parent().unwrap())
-        .map_err(|e| e.to_string())?
-        .starts_with(&dir)
-    {
-        return Err("Raw frame folder escapes the project".into());
-    }
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -4150,22 +5116,36 @@ fn replace_raw_frame_in(
             f.write_all(&bytes)?;
             f.sync_all()
         })
-        .map_err(|e| format!("Cannot preserve corrected frame: {e}"))?;
+        .map_err(|e| format!("Cannot preserve recovered frame: {e}"))?;
+    let frame = RawAnimationFrame {
+        id: id.clone(),
+        extraction_id: old.extraction_id.clone(),
+        relative_path: relative,
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        width: review.crop.width,
+        height: review.crop.height,
+        created_at: Utc::now(),
+        source_kind: review.source_kind,
+        source_relative_path: Some(review.source_relative_path.clone()),
+        source_sha256: Some(review.source_sha256.clone()),
+        source_width: Some(review.source_width),
+        source_height: Some(review.source_height),
+        source_crop: Some(review.crop.clone()),
+        background_hex: Some(review.background_hex.clone()),
+    };
     let animation = project
         .animations
         .iter_mut()
         .find(|a| a.id == animation_id)
         .unwrap();
-    animation.raw_frames.push(RawAnimationFrame {
-        id: id.clone(),
-        extraction_id,
-        relative_path: relative,
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
-        width: image.width(),
-        height: image.height(),
-        created_at: Utc::now(),
-    });
+    animation.raw_frames.push(frame);
     animation.active_raw_frame_ids[index] = id;
+    animation
+        .frame_recoveries
+        .iter_mut()
+        .find(|r| r.id == review_id)
+        .unwrap()
+        .applied_at = Some(Utc::now());
     if animation.active_batch_cleanup_id.is_some() && !animation.frames.is_empty() {
         animation.historical_frames.append(&mut animation.frames);
     }
@@ -4193,8 +5173,131 @@ fn replace_raw_frame_in(
     }
     animation.updated_at = Utc::now();
     project.updated_at = animation.updated_at;
-    atomic_json(&dir.join("project.json"), &project)?;
+    if let Err(error) = atomic_json(&dir.join("project.json"), &project) {
+        let _ = fs::remove_file(destination);
+        return Err(error);
+    }
     Ok(project)
+}
+
+fn frame_recovery_preview_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    review_id: &str,
+) -> Result<AssetPreview> {
+    let (dir, project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter()
+        .find(|a| a.id == animation_id)
+        .ok_or("Animation not found")?;
+    let review = animation
+        .frame_recoveries
+        .iter()
+        .find(|r| r.id == review_id)
+        .ok_or("Frame recovery review not found")?;
+    let (_, bytes) = verified_asset(
+        &dir,
+        &review.candidate_relative_path,
+        &review.candidate_sha256,
+    )?;
+    Ok(AssetPreview {
+        data_url: format!("data:image/png;base64,{}", STANDARD.encode(bytes)),
+        mime_type: "image/png".into(),
+        width: review.crop.width,
+        height: review.crop.height,
+    })
+}
+
+fn frame_source_preview_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    frame_id: &str,
+) -> Result<AssetPreview> {
+    let (dir, project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter()
+        .find(|a| a.id == animation_id)
+        .ok_or("Animation not found")?;
+    if !animation
+        .active_raw_frame_ids
+        .iter()
+        .any(|id| id == frame_id)
+    {
+        return Err("Frame is not active".into());
+    }
+    let frame = animation
+        .raw_frames
+        .iter()
+        .find(|f| f.id == frame_id)
+        .ok_or("Raw frame not found")?;
+    let (relative, hash, width, height) =
+        if let (Some(path), Some(hash), Some(width), Some(height)) = (
+            &frame.source_relative_path,
+            &frame.source_sha256,
+            frame.source_width,
+            frame.source_height,
+        ) {
+            (path.as_str(), hash.as_str(), width, height)
+        } else {
+            let board = animation
+                .boards
+                .iter()
+                .find(|b| Some(&b.id) == animation.active_board_id.as_ref())
+                .ok_or("Active pose board is missing")?;
+            (
+                board.relative_path.as_str(),
+                board.sha256.as_str(),
+                board.width,
+                board.height,
+            )
+        };
+    let (_, bytes) = verified_asset(&dir, relative, hash)?;
+    let mime = match image::guess_format(&bytes).map_err(|_| "Source image is damaged")? {
+        ImageFormat::Png => "image/png",
+        ImageFormat::Jpeg => "image/jpeg",
+        _ => return Err("Source image format is unsupported".into()),
+    };
+    Ok(AssetPreview {
+        data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+        mime_type: mime.into(),
+        width,
+        height,
+    })
+}
+
+fn frame_recovery_source_preview_in(
+    settings: &Settings,
+    project_id: &str,
+    animation_id: &str,
+    review_id: &str,
+) -> Result<AssetPreview> {
+    let (dir, project) = find_project(settings, project_id)?;
+    let animation = project
+        .animations
+        .iter()
+        .find(|a| a.id == animation_id)
+        .ok_or("Animation not found")?;
+    let review = animation
+        .frame_recoveries
+        .iter()
+        .find(|r| r.id == review_id)
+        .ok_or("Frame recovery review not found")?;
+    let (_, bytes) = verified_asset(&dir, &review.source_relative_path, &review.source_sha256)?;
+    let mime = match image::guess_format(&bytes).map_err(|_| "Recovery source is damaged")? {
+        ImageFormat::Png => "image/png",
+        ImageFormat::Jpeg => "image/jpeg",
+        _ => return Err("Recovery source format is unsupported".into()),
+    };
+    Ok(AssetPreview {
+        data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+        mime_type: mime.into(),
+        width: review.source_width,
+        height: review.source_height,
+    })
 }
 
 fn apply_batch_snap_in(
@@ -4572,6 +5675,27 @@ fn run_batch_cleanup_in(
     animation_id: &str,
     options: CleanupOptions,
 ) -> Result<Project> {
+    // Persist the active animation's cleanup choice before producing a new
+    // review. Other animations never inherit this edit or its invalidation.
+    let (_, existing) = find_project(settings, project_id)?;
+    let current = existing
+        .animations
+        .iter()
+        .find(|item| item.id == animation_id)
+        .ok_or("Animation not found")?;
+    let fringe =
+        effective_animation_cleanup_settings(current, &existing.workflow).green_fringe_despeckle;
+    update_animation_cleanup_settings_in(
+        settings,
+        project_id,
+        animation_id,
+        AnimationCleanupSettings {
+            background: options.background.clone(),
+            tolerance: options.tolerance,
+            min_area: options.min_area,
+            green_fringe_despeckle: fringe,
+        },
+    )?;
     let (dir, mut project) = find_project(settings, project_id)?;
     let animation = project
         .animations
@@ -4626,6 +5750,18 @@ fn run_batch_cleanup_in(
         }
     }
     let background = validated_cleanup_options(&options)?;
+    let fringe_cleanup =
+        effective_animation_cleanup_settings(animation, &project.workflow).green_fringe_despeckle;
+    let known_backgrounds: BTreeMap<String, String> = animation
+        .raw_frames
+        .iter()
+        .filter_map(|frame| {
+            frame
+                .background_hex
+                .as_ref()
+                .map(|hex| (frame.id.clone(), hex.clone()))
+        })
+        .collect();
     let executable = fs::canonicalize(
         settings
             .python_executable
@@ -4678,18 +5814,21 @@ fn run_batch_cleanup_in(
                 .arg(dir.join(&frame.1))
                 .arg(dir.join(&cleaned_relative_path))
                 .arg(dir.join(&normalized_relative_path))
-                .arg(&background)
+                .arg(if background == "auto" {
+                    known_backgrounds
+                        .get(&frame.0)
+                        .map(String::as_str)
+                        .unwrap_or("auto")
+                } else {
+                    &background
+                })
                 .arg(options.tolerance.to_string())
                 .arg(options.min_area.to_string())
                 .arg(runtime.cell_width.to_string())
                 .arg(runtime.cell_height.to_string())
                 .arg(runtime.pivot_x.to_string())
                 .arg(runtime.pivot_y.to_string())
-                .arg(if project.workflow.green_fringe_despeckle {
-                    "1"
-                } else {
-                    "0"
-                })
+                .arg(if fringe_cleanup { "1" } else { "0" })
                 .output()
                 .map_err(|e| format!("Cleanup could not run on frame {}: {e}", index + 1))?;
             if !output.status.success() {
@@ -4739,7 +5878,7 @@ fn run_batch_cleanup_in(
             background_hex: background,
             tolerance: options.tolerance,
             min_area: options.min_area,
-            green_fringe_despeckle: project.workflow.green_fringe_despeckle,
+            green_fringe_despeckle: fringe_cleanup,
             python_environment: environment,
             created_at: Utc::now(),
             applied_at: None,
@@ -4814,7 +5953,9 @@ fn approve_batch_clean_in(
     } else if !review.upscale_frame_ids.is_empty() {
         return Err("Cleanup was made in manual mode; clean again".into());
     }
-    if review.green_fringe_despeckle != project.workflow.green_fringe_despeckle {
+    if review.green_fringe_despeckle
+        != effective_animation_cleanup_settings(animation, &project.workflow).green_fringe_despeckle
+    {
         return Err("Fringe cleanup setting changed; clean again".into());
     }
     for frame in &review.frames {
@@ -4878,7 +6019,9 @@ fn apply_batch_cleanup_in(
     } else if !review.upscale_frame_ids.is_empty() {
         return Err("Cleanup was made from manual upscale inputs; clean again".into());
     }
-    if review.green_fringe_despeckle != project.workflow.green_fringe_despeckle {
+    if review.green_fringe_despeckle
+        != effective_animation_cleanup_settings(animation, &project.workflow).green_fringe_despeckle
+    {
         return Err("Fringe cleanup setting changed; clean again".into());
     }
     let runtime = &project.runtime;
@@ -6379,7 +7522,7 @@ pub fn read_raw_animation_frame(
 }
 
 #[tauri::command]
-pub async fn run_batch_snap(
+pub async fn analyze_batch_scale(
     app: tauri::AppHandle,
     state: tauri::State<'_, StudioLock>,
     project_id: String,
@@ -6392,7 +7535,40 @@ pub async fn run_batch_snap(
             .lock()
             .map_err(|_| "Project operation lock is unavailable")?;
         let settings = read_settings(&settings_file(&app)?)?;
-        run_batch_snap_in(&settings, &project_id, &animation_id, options)
+        analyze_batch_scale_in(&settings, &project_id, &animation_id, options)
+    })
+    .await
+    .map_err(|e| format!("Scale analysis task did not complete: {e}"))?
+}
+
+#[tauri::command]
+pub async fn run_batch_snap(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    animation_id: String,
+    options: BatchSnapRequest,
+) -> Result<Project> {
+    let lock = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock
+            .lock()
+            .map_err(|_| "Project operation lock is unavailable")?;
+        let settings = read_settings(&settings_file(&app)?)?;
+        let selection = options.scale_mode.map(|mode| {
+            (
+                mode,
+                options.scale_analysis_id.clone(),
+                options.scale_reference_frame_id.clone(),
+            )
+        });
+        run_batch_snap_with_scale_in(
+            &settings,
+            &project_id,
+            &animation_id,
+            options.options(),
+            selection,
+        )
     })
     .await
     .map_err(|e| format!("Batch snap task did not complete: {e}"))?
@@ -6522,6 +7698,22 @@ pub fn update_workflow(
 }
 
 #[tauri::command]
+pub fn update_animation_cleanup_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    animation_id: String,
+    cleanup_settings: AnimationCleanupSettings,
+) -> Result<Project> {
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "Project operation lock is unavailable")?;
+    let settings = read_settings(&settings_file(&app)?)?;
+    update_animation_cleanup_settings_in(&settings, &project_id, &animation_id, cleanup_settings)
+}
+
+#[tauri::command]
 pub fn update_runtime(
     app: tauri::AppHandle,
     state: tauri::State<'_, StudioLock>,
@@ -6595,21 +7787,74 @@ pub fn replace_raw_frame(
     animation_id: String,
     frame_id: String,
     source_path: Option<String>,
+    source_review_id: Option<String>,
     crop: Option<ManualCrop>,
+    options: ExtractionOptions,
 ) -> Result<Project> {
     let _guard = state
         .0
         .lock()
         .map_err(|_| "Project operation lock is unavailable")?;
     let settings = read_settings(&settings_file(&app)?)?;
-    replace_raw_frame_in(
+    propose_frame_recovery_in(
         &settings,
         &project_id,
         &animation_id,
         &frame_id,
         source_path.as_deref(),
+        source_review_id.as_deref(),
         crop,
+        options,
     )
+}
+
+#[tauri::command]
+pub fn apply_frame_recovery(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, StudioLock>,
+    project_id: String,
+    animation_id: String,
+    review_id: String,
+) -> Result<Project> {
+    let _guard = state
+        .0
+        .lock()
+        .map_err(|_| "Project operation lock is unavailable")?;
+    let settings = read_settings(&settings_file(&app)?)?;
+    apply_frame_recovery_in(&settings, &project_id, &animation_id, &review_id)
+}
+
+#[tauri::command]
+pub fn read_frame_recovery_preview(
+    app: tauri::AppHandle,
+    project_id: String,
+    animation_id: String,
+    review_id: String,
+) -> Result<AssetPreview> {
+    let settings = read_settings(&settings_file(&app)?)?;
+    frame_recovery_preview_in(&settings, &project_id, &animation_id, &review_id)
+}
+
+#[tauri::command]
+pub fn read_frame_source_preview(
+    app: tauri::AppHandle,
+    project_id: String,
+    animation_id: String,
+    frame_id: String,
+) -> Result<AssetPreview> {
+    let settings = read_settings(&settings_file(&app)?)?;
+    frame_source_preview_in(&settings, &project_id, &animation_id, &frame_id)
+}
+
+#[tauri::command]
+pub fn read_frame_recovery_source_preview(
+    app: tauri::AppHandle,
+    project_id: String,
+    animation_id: String,
+    review_id: String,
+) -> Result<AssetPreview> {
+    let settings = read_settings(&settings_file(&app)?)?;
+    frame_recovery_source_preview_in(&settings, &project_id, &animation_id, &review_id)
 }
 
 #[tauri::command]
@@ -6821,6 +8066,187 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[test]
+    fn animation_cleanup_edit_preserves_other_animation_and_upstream_reviews() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "Scoped cleanup", Preset::Generic).unwrap();
+        let project = create_animation_in(&settings, &project.id, "idle", "east").unwrap();
+        let mut project = create_animation_in(&settings, &project.id, "attack", "east").unwrap();
+        for stage in [
+            "snap",
+            "cleanup",
+            "normalize",
+            "frames",
+            "align",
+            "preview",
+            "export",
+        ] {
+            project.animations[1]
+                .stages
+                .insert(stage.into(), StageState::Complete);
+        }
+        project.animations[1].active_batch_snap_id = Some("other-snap".into());
+        project.animations[1].active_export_id = Some("other-export".into());
+        let other_before = serde_json::to_value(&project.animations[1]).unwrap();
+        let (first, rest) = project.animations.split_at_mut(1);
+        let animation = &mut first[0];
+        let other = &rest[0];
+        animation.active_batch_snap_id = Some("snap-1".into());
+        animation.active_batch_cleanup_id = Some("clean-1".into());
+        animation.active_alignment_id = Some("align-1".into());
+        animation.active_preview_id = Some("preview-1".into());
+        animation.active_export_id = Some("export-1".into());
+        animation.active_raw_frame_ids = vec!["accepted-replacement-1".into()];
+        animation.frames.push(AnimationFrame {
+            id: "normalized-1".into(),
+            original_name: "reviewed.png".into(),
+            relative_path: "kept/normalized.png".into(),
+            sha256: "hash".into(),
+            width: 128,
+            height: 128,
+            imported_at: Utc::now(),
+        });
+        animation.batch_cleanups.push(BatchCleanupReview {
+            id: "clean-1".into(),
+            snap_review_id: "snap-1".into(),
+            upscale_frame_ids: vec![],
+            frames: vec![],
+            background_hex: "00ff00".into(),
+            tolerance: 24,
+            min_area: 2,
+            green_fringe_despeckle: true,
+            python_environment: "test".into(),
+            created_at: Utc::now(),
+            applied_at: Some(Utc::now()),
+        });
+        for stage in [
+            "snap",
+            "native_review",
+            "cleanup",
+            "normalize",
+            "frames",
+            "align",
+            "preview",
+            "export",
+        ] {
+            animation.stages.insert(stage.into(), StageState::Complete);
+        }
+        let upstream = animation.active_raw_frame_ids.clone();
+        let snap = animation.active_batch_snap_id.clone();
+        let requested = AnimationCleanupSettings {
+            background: "ff00ff".into(),
+            tolerance: 24,
+            min_area: 2,
+            green_fringe_despeckle: false,
+        };
+        assert!(set_animation_cleanup_settings(
+            animation,
+            &project.workflow,
+            requested.clone()
+        ));
+        assert_eq!(animation.active_raw_frame_ids, upstream);
+        assert_eq!(animation.active_batch_snap_id, snap);
+        assert_eq!(animation.stages["snap"], StageState::Complete);
+        assert_eq!(animation.stages["native_review"], StageState::Complete);
+        assert_eq!(animation.stages["cleanup"], StageState::Stale);
+        assert_eq!(animation.stages["export"], StageState::Stale);
+        assert_eq!(animation.historical_frames.len(), 1);
+        assert_eq!(animation.batch_cleanups.len(), 1);
+        assert_eq!(serde_json::to_value(other).unwrap(), other_before);
+        assert!(!set_animation_cleanup_settings(
+            animation,
+            &project.workflow,
+            requested
+        ));
+        assert_eq!(animation.historical_frames.len(), 1);
+        assert_eq!(serde_json::to_value(other).unwrap(), other_before);
+    }
+
+    #[test]
+    fn project_fringe_default_change_does_not_reset_existing_animations() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "Defaults", Preset::Generic).unwrap();
+        let project = create_animation_in(&settings, &project.id, "one", "east").unwrap();
+        let project = create_animation_in(&settings, &project.id, "two", "east").unwrap();
+        let animations_before = serde_json::to_value(&project.animations).unwrap();
+        let mut workflow = project.workflow.clone();
+        workflow.green_fringe_despeckle = !workflow.green_fringe_despeckle;
+        let changed = update_workflow_in(&settings, &project.id, workflow).unwrap();
+        assert_eq!(
+            serde_json::to_value(&changed.animations).unwrap(),
+            animations_before
+        );
+        let reopened = find_project(&settings, &project.id).unwrap().1;
+        assert_eq!(
+            serde_json::to_value(&reopened.animations).unwrap(),
+            animations_before
+        );
+    }
+
+    #[test]
+    fn repeated_cleanup_settings_edits_persist_without_touching_other_animation() {
+        let tmp = tempdir().unwrap();
+        let settings = test_settings(tmp.path());
+        let project = create_project_in(&settings, "Persisted cleanup", Preset::Generic).unwrap();
+        let project = create_animation_in(&settings, &project.id, "one", "east").unwrap();
+        let project = create_animation_in(&settings, &project.id, "two", "east").unwrap();
+        let first_id = project.animations[0].id.clone();
+        let other_before = serde_json::to_value(&project.animations[1]).unwrap();
+        for background in ["#00ff00", "#ff00ff"] {
+            update_animation_cleanup_settings_in(
+                &settings,
+                &project.id,
+                &first_id,
+                AnimationCleanupSettings {
+                    background: background.into(),
+                    tolerance: 24,
+                    min_area: 2,
+                    green_fringe_despeckle: false,
+                },
+            )
+            .unwrap();
+            let reopened = find_project(&settings, &project.id).unwrap().1;
+            assert_eq!(
+                serde_json::to_value(&reopened.animations[1]).unwrap(),
+                other_before
+            );
+        }
+        let reopened = find_project(&settings, &project.id).unwrap().1;
+        assert_eq!(
+            reopened.animations[0]
+                .cleanup_settings
+                .as_ref()
+                .unwrap()
+                .background,
+            "ff00ff"
+        );
+        assert_eq!(
+            reopened.animations[1]
+                .cleanup_settings
+                .as_ref()
+                .unwrap()
+                .background,
+            "auto"
+        );
+    }
+
+    #[test]
+    fn failed_metadata_precommit_keeps_previous_durable_json() {
+        let tmp = tempdir().unwrap();
+        let file = tmp.path().join("project.json");
+        atomic_json(&file, &serde_json::json!({"old": true})).unwrap();
+        let previous = fs::read(&file).unwrap();
+        assert!(
+            atomic_json_with_precommit(&file, &serde_json::json!({"old": false}), || Err(
+                "simulated persistence interruption".into()
+            ))
+            .is_err()
+        );
+        assert_eq!(fs::read(&file).unwrap(), previous);
+    }
+
     fn test_settings(root: &Path) -> Settings {
         fs::create_dir_all(root.join("projects")).unwrap();
         Settings {
@@ -6866,6 +8292,42 @@ mod tests {
         assert!(!snap_placement(&runtime, 129, 70).2);
         assert!(!snap_placement(&runtime, 80, 114).2);
         assert!(snap_placement(&runtime, 80, 113).2);
+    }
+
+    #[test]
+    fn shared_pitch_uses_robust_mode_and_flags_pitch_not_pose_extent() {
+        assert_eq!(recommended_shared_pitch(&[8, 8, 9, 8, 8]).unwrap(), 8);
+        assert_eq!(recommended_shared_pitch(&[8, 9, 9, 8, 10]).unwrap(), 9);
+        assert_eq!(recommended_shared_pitch(&[8, 9]).unwrap(), 8);
+        assert!(pitch_is_outlier(9.0, 8.0));
+        assert!(!pitch_is_outlier(8.4, 8.0));
+        assert!(recommended_shared_pitch(&[]).is_err());
+        let mut image = image::RgbaImage::from_pixel(100, 100, image::Rgba([0, 255, 0, 255]));
+        for y in 30..70 {
+            for x in 30..70 {
+                image.put_pixel(x, y, image::Rgba([200, 80, 30, 255]));
+            }
+        }
+        let mut bytes = Cursor::new(Vec::new());
+        image.write_to(&mut bytes, ImageFormat::Png).unwrap();
+        let metric = scale_metric_from_png(
+            "frame",
+            bytes.get_ref(),
+            Some("00ff00"),
+            Some(8.0),
+            Some(8.0),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                metric.foreground_width,
+                metric.foreground_height,
+                metric.foreground_area
+            ),
+            (40, 40, 1600)
+        );
+        assert!(metric.head_region.is_some() && metric.body_core_region.is_some());
+        assert!(!metric.pitch_differs);
     }
 
     #[test]
@@ -8184,20 +9646,73 @@ mod tests {
             )
             .unwrap();
             let settings = configure_snapper_in(&settings_path, &snapper).unwrap();
-            let snapped = run_batch_snap_in(
+            let analysis = analyze_batch_scale_in(
                 &settings,
                 &project.id,
                 &animation_id,
                 SnapOptions {
                     colors: 8,
-                    pixel_size: Some(4),
+                    pixel_size: None,
                     palette: None,
                 },
             )
             .unwrap();
+            let scale = analysis.animations[0].scale_analyses.last().unwrap();
+            assert_eq!(scale.frames.len(), 3);
+            assert!(scale
+                .frames
+                .iter()
+                .all(|frame| frame.estimated_pixel_size >= 1.0));
+            let scale_id = scale.id.clone();
+            let recommended = scale.recommended_pixel_size;
+            let per_frame = run_batch_snap_with_scale_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                SnapOptions {
+                    colors: 8,
+                    pixel_size: None,
+                    palette: None,
+                },
+                Some((PixelScaleMode::PerFrameAuto, None, None)),
+            )
+            .unwrap();
+            let per_frame_review = per_frame.animations[0].batch_snaps.last().unwrap();
+            assert_eq!(per_frame_review.scale_mode, PixelScaleMode::PerFrameAuto);
+            assert!(per_frame_review.pixel_size.is_none());
+            assert_eq!(per_frame_review.scale_metrics.len(), 3);
+            let previous_id = per_frame_review.id.clone();
+            apply_batch_snap_in(&settings, &project.id, &animation_id, &previous_id).unwrap();
+            let snapped = run_batch_snap_with_scale_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                SnapOptions {
+                    colors: 8,
+                    pixel_size: None,
+                    palette: None,
+                },
+                Some((
+                    PixelScaleMode::SharedAnimationScale,
+                    Some(scale_id.clone()),
+                    None,
+                )),
+            )
+            .unwrap();
             assert_eq!(snapped.animations[0].stages["snap"], StageState::Review);
-            let snap = &snapped.animations[0].batch_snaps[0];
+            assert_eq!(
+                snapped.animations[0].active_batch_snap_id.as_deref(),
+                Some(previous_id.as_str())
+            );
+            let snap = snapped.animations[0].batch_snaps.last().unwrap();
             assert_eq!(snap.frames.len(), 3);
+            assert_eq!(snap.pixel_size, Some(recommended));
+            assert_eq!(snap.scale_analysis_id.as_deref(), Some(scale_id.as_str()));
+            assert!(snap
+                .scale_metrics
+                .iter()
+                .all(|metric| metric.effective_pixel_size == Some(recommended as f64)));
+            assert!(!snap.scale_inconsistency);
             assert!(batch_frame_preview_in(
                 &settings,
                 &project.id,
@@ -8207,8 +9722,34 @@ mod tests {
                 "snapped"
             )
             .is_ok());
+            let reference_id = curated.animations[0].active_raw_frame_ids[0].clone();
+            let reference_size = scale.frames[0].rounded_pixel_size;
+            let reference_reviewed = run_batch_snap_with_scale_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                SnapOptions {
+                    colors: 8,
+                    pixel_size: None,
+                    palette: None,
+                },
+                Some((
+                    PixelScaleMode::SharedAnimationScale,
+                    Some(scale_id),
+                    Some(reference_id.clone()),
+                )),
+            )
+            .unwrap();
+            let reference_snap = reference_reviewed.animations[0].batch_snaps.last().unwrap();
+            assert_eq!(reference_snap.pixel_size, Some(reference_size));
+            assert_eq!(
+                reference_snap.scale_reference_frame_id.as_deref(),
+                Some(reference_id.as_str())
+            );
+            assert_eq!(reference_reviewed.animations[0].batch_snaps.len(), 3);
             let applied =
-                apply_batch_snap_in(&settings, &project.id, &animation_id, &snap.id).unwrap();
+                apply_batch_snap_in(&settings, &project.id, &animation_id, &reference_snap.id)
+                    .unwrap();
             assert_eq!(applied.animations[0].stages["snap"], StageState::Complete);
             let cleaned = run_batch_cleanup_in(
                 &settings,
@@ -8239,6 +9780,451 @@ mod tests {
             assert_eq!(applied.animations[0].frames.len(), 3);
             assert_eq!(applied.animations[0].stages["frames"], StageState::Complete);
             assert!(read_project(&find_project(&settings, &project.id).unwrap().0).is_ok());
+        }
+    }
+
+    #[test]
+    fn standalone_replacement_recovers_natural_crop_and_requires_apply() {
+        let Ok(python) = std::env::var("SPRITE_STUDIO_TEST_PYTHON") else {
+            return;
+        };
+        let tmp = tempdir().unwrap();
+        let base = test_settings(tmp.path());
+        let settings_path = tmp.path().join("app-settings.json");
+        atomic_json(&settings_path, &base).unwrap();
+        let mut settings = configure_python_in(&settings_path, &python).unwrap();
+        let project = create_project_in(&settings, "Replacement", Preset::Generic).unwrap();
+        let project = update_runtime_in(
+            &settings,
+            &project.id,
+            128,
+            128,
+            64,
+            112,
+            AnchorMode::Custom,
+        )
+        .unwrap();
+        let project = create_animation_in(&settings, &project.id, "idle", "south").unwrap();
+        let animation_id = project.animations[0].id.clone();
+        let board_path = tmp.path().join("board.png");
+        let mut board = image::RgbImage::from_pixel(512, 256, image::Rgb([0, 255, 0]));
+        for y in 80..135 {
+            for x in 60..105 {
+                board.put_pixel(x, y, image::Rgb([220, 85, 35]));
+            }
+        }
+        for y in 75..145 {
+            for x in 325..365 {
+                board.put_pixel(x, y, image::Rgb([80, 50, 45]));
+            }
+        }
+        board.save(&board_path).unwrap();
+        import_board_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            board_path.to_str().unwrap(),
+        )
+        .unwrap();
+        let detected = run_extraction_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4,
+            },
+        )
+        .unwrap();
+        let extraction = detected.animations[0].extractions.last().unwrap();
+        assert_eq!(extraction.boxes.len(), 2);
+        let project = apply_extraction_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &extraction.id,
+            extraction.boxes.iter().map(|b| b.id.clone()).collect(),
+            vec![],
+        )
+        .unwrap();
+        let original_ids = project.animations[0].active_raw_frame_ids.clone();
+        let original_paths: Vec<_> = project.animations[0]
+            .raw_frames
+            .iter()
+            .map(|f| f.relative_path.clone())
+            .collect();
+        let (dir, _) = find_project(&settings, &project.id).unwrap();
+        let original_bytes: Vec<_> = original_paths
+            .iter()
+            .map(|p| fs::read(dir.join(p)).unwrap())
+            .collect();
+        let prior_snap = if let Ok(snapper) = std::env::var("SPRITE_STUDIO_TEST_SNAPPER") {
+            settings.snapper_executable = Some(snapper);
+            confirm_native_review_in(&settings, &project.id, &animation_id, original_ids.clone())
+                .unwrap();
+            let snapped = run_batch_snap_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                SnapOptions {
+                    colors: 16,
+                    pixel_size: Some(4),
+                    palette: None,
+                },
+            )
+            .unwrap();
+            let snap_id = snapped.animations[0].batch_snaps.last().unwrap().id.clone();
+            apply_batch_snap_in(&settings, &project.id, &animation_id, &snap_id).unwrap();
+            Some(snap_id)
+        } else {
+            None
+        };
+
+        let source_path = tmp.path().join("replacement.png");
+        let mut source = image::RgbImage::from_pixel(1536, 1024, image::Rgb([0, 255, 0]));
+        for y in 450..540 {
+            for x in 700..780 {
+                source.put_pixel(x, y, image::Rgb([230, 98, 31]));
+            }
+        }
+        // A detached limb within merge gap belongs to the pose; isolated noise does not.
+        for y in 500..511 {
+            for x in 782..794 {
+                source.put_pixel(x, y, image::Rgb([230, 98, 31]));
+            }
+        }
+        for y in 10..12 {
+            for x in 10..12 {
+                source.put_pixel(x, y, image::Rgb([230, 98, 31]));
+            }
+        }
+        for y in 900..902 {
+            for x in 1400..1402 {
+                source.put_pixel(x, y, image::Rgb([230, 98, 31]));
+            }
+        }
+        source.save(&source_path).unwrap();
+        let options = ExtractionOptions {
+            background: "#00FF00".into(),
+            tolerance: 24,
+            min_area: 64,
+            merge_gap: 4,
+        };
+        let proposed = propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &original_ids[0],
+            Some(source_path.to_str().unwrap()),
+            None,
+            None,
+            options,
+        )
+        .unwrap();
+        let review = proposed.animations[0].frame_recoveries.last().unwrap();
+        assert_eq!(proposed.animations[0].active_raw_frame_ids, original_ids);
+        assert_eq!(proposed.animations[0].active_batch_snap_id, prior_snap);
+        assert_eq!(review.source_kind, FrameSourceKind::StandaloneReplacement);
+        assert_eq!((review.source_width, review.source_height), (1536, 1024));
+        assert!(review.crop.x > 600 && review.crop.y > 400);
+        assert!(review.crop.width > 80 && review.crop.height > 90);
+        assert_ne!(
+            (
+                review.crop.x,
+                review.crop.y,
+                review.crop.width,
+                review.crop.height
+            ),
+            (0, 0, 128, 128)
+        );
+        assert_eq!(review.background_hex, "00ff00");
+        assert!(
+            frame_recovery_preview_in(&settings, &project.id, &animation_id, &review.id).is_ok()
+        );
+        let source_original = fs::read(&source_path).unwrap();
+        assert_eq!(
+            fs::read(dir.join(&review.source_relative_path)).unwrap(),
+            source_original
+        );
+        let first_review_id = review.id.clone();
+        let rerun = propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &original_ids[0],
+            None,
+            Some(&first_review_id),
+            None,
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4,
+            },
+        )
+        .unwrap();
+        let review_id = rerun.animations[0]
+            .frame_recoveries
+            .last()
+            .unwrap()
+            .id
+            .clone();
+        assert_eq!(
+            rerun.animations[0]
+                .frame_recoveries
+                .last()
+                .unwrap()
+                .candidate_sha256,
+            review.candidate_sha256
+        );
+        assert!(
+            apply_frame_recovery_in(&settings, &project.id, &animation_id, &first_review_id)
+                .is_err()
+        );
+        let applied =
+            apply_frame_recovery_in(&settings, &project.id, &animation_id, &review_id).unwrap();
+        let new_id = applied.animations[0].active_raw_frame_ids[0].clone();
+        assert_ne!(new_id, original_ids[0]);
+        assert!(applied.animations[0].active_batch_snap_id.is_none());
+        if let Some(prior) = &prior_snap {
+            assert!(applied.animations[0]
+                .batch_snaps
+                .iter()
+                .any(|snap| &snap.id == prior));
+        }
+        assert_eq!(
+            applied.animations[0].active_raw_frame_ids[1],
+            original_ids[1]
+        );
+        let active = applied.animations[0]
+            .raw_frames
+            .iter()
+            .find(|f| f.id == new_id)
+            .unwrap();
+        assert_eq!(
+            (active.width, active.height),
+            (review.crop.width, review.crop.height)
+        );
+        assert_eq!(active.background_hex.as_deref(), Some("00ff00"));
+        let raw = image::open(dir.join(&active.relative_path))
+            .unwrap()
+            .to_rgb8();
+        let active_png_bytes = fs::read(dir.join(&active.relative_path)).unwrap();
+        assert_eq!(raw.get_pixel(0, 0).0, [0, 255, 0]);
+        assert_eq!(raw.get_pixel(4, 4).0, [230, 98, 31]);
+        for (path, bytes) in original_paths.iter().zip(&original_bytes) {
+            assert_eq!(&fs::read(dir.join(path)).unwrap(), bytes);
+        }
+
+        // Auto chroma produces the same crop and hash from the preserved replacement source.
+        let auto = propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &new_id,
+            None,
+            None,
+            None,
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4,
+            },
+        )
+        .unwrap();
+        let auto_review = auto.animations[0].frame_recoveries.last().unwrap();
+        assert_eq!(auto_review.background_hex, "00ff00");
+        assert_eq!(auto_review.candidate_sha256, review.candidate_sha256);
+        assert_eq!(auto.animations[0].active_raw_frame_ids[0], new_id);
+
+        let manual = propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &new_id,
+            None,
+            None,
+            Some(ManualCrop {
+                x: 650,
+                y: 400,
+                width: 200,
+                height: 180,
+            }),
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4,
+            },
+        )
+        .unwrap();
+        let manual_review = manual.animations[0].frame_recoveries.last().unwrap();
+        assert_eq!(
+            (
+                manual_review.crop.x,
+                manual_review.crop.y,
+                manual_review.crop.width,
+                manual_review.crop.height
+            ),
+            (650, 400, 200, 180)
+        );
+        assert_eq!(
+            manual_review.source_kind,
+            FrameSourceKind::StandaloneReplacement
+        );
+        assert!(propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &new_id,
+            None,
+            None,
+            Some(ManualCrop {
+                x: 1500,
+                y: 1000,
+                width: 128,
+                height: 128
+            }),
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4
+            }
+        )
+        .is_err());
+
+        let blank_path = tmp.path().join("blank.png");
+        image::RgbImage::from_pixel(512, 512, image::Rgb([0, 255, 0]))
+            .save(&blank_path)
+            .unwrap();
+        assert!(propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &new_id,
+            Some(blank_path.to_str().unwrap()),
+            None,
+            None,
+            ExtractionOptions {
+                background: "auto".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4
+            }
+        )
+        .is_err());
+        assert_eq!(
+            read_project(&dir).unwrap().animations[0].active_raw_frame_ids[0],
+            new_id
+        );
+
+        let edge_path = tmp.path().join("edge.png");
+        let mut edge = image::RgbImage::from_pixel(256, 256, image::Rgb([0, 255, 0]));
+        for y in 0..55 {
+            for x in 0..39 {
+                edge.put_pixel(x, y, image::Rgb([200, 90, 30]));
+            }
+        }
+        edge.save(&edge_path).unwrap();
+        let edge_reviewed = propose_frame_recovery_in(
+            &settings,
+            &project.id,
+            &animation_id,
+            &new_id,
+            Some(edge_path.to_str().unwrap()),
+            None,
+            None,
+            ExtractionOptions {
+                background: "#00FF00".into(),
+                tolerance: 24,
+                min_area: 64,
+                merge_gap: 4,
+            },
+        )
+        .unwrap();
+        let edge_review = edge_reviewed.animations[0].frame_recoveries.last().unwrap();
+        assert_eq!((edge_review.crop.x, edge_review.crop.y), (0, 0));
+        let replaced_again =
+            apply_frame_recovery_in(&settings, &project.id, &animation_id, &edge_review.id)
+                .unwrap();
+        assert_ne!(replaced_again.animations[0].active_raw_frame_ids[0], new_id);
+        assert_eq!(
+            replaced_again.animations[0].active_raw_frame_ids[1],
+            original_ids[1]
+        );
+        assert_eq!(
+            fs::read(dir.join(&active.relative_path)).unwrap(),
+            active_png_bytes
+        );
+        assert_eq!(
+            (
+                replaced_again.runtime.cell_width,
+                replaced_again.runtime.cell_height,
+                replaced_again.runtime.pivot_x,
+                replaced_again.runtime.pivot_y
+            ),
+            (128, 128, 64, 112)
+        );
+        assert!(read_project(&dir).is_ok());
+
+        if let Ok(snapper) = std::env::var("SPRITE_STUDIO_TEST_SNAPPER") {
+            settings.snapper_executable = Some(snapper);
+            confirm_native_review_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                replaced_again.animations[0].active_raw_frame_ids.clone(),
+            )
+            .unwrap();
+            let snapped = run_batch_snap_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                SnapOptions {
+                    colors: 16,
+                    pixel_size: Some(4),
+                    palette: None,
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                snapped.animations[0]
+                    .batch_snaps
+                    .last()
+                    .unwrap()
+                    .source_frame_ids,
+                replaced_again.animations[0].active_raw_frame_ids
+            );
+            let snap_id = snapped.animations[0].batch_snaps.last().unwrap().id.clone();
+            apply_batch_snap_in(&settings, &project.id, &animation_id, &snap_id).unwrap();
+            let cleaned = run_batch_cleanup_in(
+                &settings,
+                &project.id,
+                &animation_id,
+                CleanupOptions {
+                    background: "auto".into(),
+                    tolerance: 24,
+                    min_area: 2,
+                },
+            )
+            .unwrap();
+            let clean_id = cleaned.animations[0]
+                .batch_cleanups
+                .last()
+                .unwrap()
+                .id
+                .clone();
+            approve_batch_clean_in(&settings, &project.id, &animation_id, &clean_id).unwrap();
+            let normalized =
+                apply_batch_cleanup_in(&settings, &project.id, &animation_id, &clean_id).unwrap();
+            assert!(normalized.animations[0]
+                .frames
+                .iter()
+                .all(|f| (f.width, f.height) == (128, 128)));
         }
     }
 
@@ -8543,6 +10529,13 @@ mod tests {
                 width: 4,
                 height: 4,
                 created_at: now,
+                source_kind: FrameSourceKind::BoardCrop,
+                source_relative_path: None,
+                source_sha256: None,
+                source_width: None,
+                source_height: None,
+                source_crop: None,
+                background_hex: None,
             });
             animation.active_raw_frame_ids.push(frame_id.clone());
             snapped.push(BatchFrameArtifact {
@@ -8564,6 +10557,11 @@ mod tests {
             colors: 256,
             pixel_size: Some(1),
             detected_pixel_size: Some(1.0),
+            scale_mode: PixelScaleMode::SharedAnimationScale,
+            scale_analysis_id: None,
+            scale_reference_frame_id: None,
+            scale_metrics: vec![],
+            scale_inconsistency: false,
             auto_fit_run_id: None,
             palette: None,
             tool_version: "fixture".into(),
@@ -8715,36 +10713,70 @@ mod tests {
             assert_eq!(fs::read(dir.join(&frame.relative_path)).unwrap(), bytes);
         }
         let old_raw_path = versioned.animations[0].raw_frames[0].relative_path.clone();
-        let recropped = replace_raw_frame_in(
-            &settings,
-            &project.id,
-            &animation_id,
-            &ids[0],
-            None,
-            Some(ManualCrop {
-                x: 0,
-                y: 0,
-                width: 4,
-                height: 4,
-            }),
-        )
-        .unwrap();
-        let new_raw_id = recropped.animations[0].active_raw_frame_ids[0].clone();
-        assert_ne!(new_raw_id, ids[0]);
-        assert_eq!(
-            recropped.animations[0].stages["native_review"],
-            StageState::Review
-        );
-        let replaced = replace_raw_frame_in(
-            &settings,
-            &project.id,
-            &animation_id,
-            &new_raw_id,
-            Some(source.to_str().unwrap()),
-            None,
-        )
-        .unwrap();
-        assert_ne!(replaced.animations[0].active_raw_frame_ids[0], new_raw_id);
+        if let Ok(python) = std::env::var("SPRITE_STUDIO_TEST_PYTHON") {
+            let mut with_python = settings.clone();
+            with_python.python_executable = Some(python);
+            let options = || ExtractionOptions {
+                background: "#00ff00".into(),
+                tolerance: 0,
+                min_area: 1,
+                merge_gap: 0,
+            };
+            let recrop = propose_frame_recovery_in(
+                &with_python,
+                &project.id,
+                &animation_id,
+                &ids[0],
+                None,
+                None,
+                Some(ManualCrop {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 4,
+                }),
+                options(),
+            )
+            .unwrap();
+            assert_eq!(recrop.animations[0].active_raw_frame_ids[0], ids[0]);
+            let recrop_id = recrop.animations[0]
+                .frame_recoveries
+                .last()
+                .unwrap()
+                .id
+                .clone();
+            let recropped =
+                apply_frame_recovery_in(&with_python, &project.id, &animation_id, &recrop_id)
+                    .unwrap();
+            let new_raw_id = recropped.animations[0].active_raw_frame_ids[0].clone();
+            assert_ne!(new_raw_id, ids[0]);
+            assert_eq!(
+                recropped.animations[0].stages["native_review"],
+                StageState::Review
+            );
+            let proposed = propose_frame_recovery_in(
+                &with_python,
+                &project.id,
+                &animation_id,
+                &new_raw_id,
+                Some(source.to_str().unwrap()),
+                None,
+                None,
+                options(),
+            )
+            .unwrap();
+            assert_eq!(proposed.animations[0].active_raw_frame_ids[0], new_raw_id);
+            let replacement_id = proposed.animations[0]
+                .frame_recoveries
+                .last()
+                .unwrap()
+                .id
+                .clone();
+            let replaced =
+                apply_frame_recovery_in(&with_python, &project.id, &animation_id, &replacement_id)
+                    .unwrap();
+            assert_ne!(replaced.animations[0].active_raw_frame_ids[0], new_raw_id);
+        }
         assert_eq!(fs::read(dir.join(old_raw_path)).unwrap(), bytes);
         assert!(read_project(&dir).is_ok());
     }

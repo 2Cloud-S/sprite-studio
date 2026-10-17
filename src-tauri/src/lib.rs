@@ -1,3 +1,12 @@
+pub mod recovery;
+mod asset_io;
+mod vfx;
+
+pub fn verify_project_file(path: &std::path::Path) -> std::result::Result<(), String> {
+    let dir = path.parent().ok_or("Project file has no directory")?;
+    studio::read_project(dir).map(|_| ())
+}
+mod environment;
 mod studio;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -6,6 +15,9 @@ pub fn run() {
         .manage(studio::StudioLock::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            vfx::vfx_command,
+            environment::environment_command,
+            environment::environment_library,
             studio::get_app_state,
             studio::set_workspace,
             studio::list_projects,
@@ -44,6 +56,7 @@ pub fn run() {
             studio::read_extraction_candidate,
             studio::apply_pose_extraction,
             studio::read_raw_animation_frame,
+            studio::analyze_batch_scale,
             studio::run_batch_snap,
             studio::run_batch_auto_fit,
             studio::apply_batch_snap,
@@ -52,10 +65,15 @@ pub fn run() {
             studio::approve_batch_clean,
             studio::read_batch_frame_preview,
             studio::update_workflow,
+            studio::update_animation_cleanup_settings,
             studio::update_runtime,
             studio::update_runtime_policy,
             studio::confirm_native_review,
             studio::replace_raw_frame,
+            studio::apply_frame_recovery,
+            studio::read_frame_recovery_preview,
+            studio::read_frame_source_preview,
+            studio::read_frame_recovery_source_preview,
             studio::import_upscaled_frame,
             studio::approve_upscale,
             studio::export_snapped,

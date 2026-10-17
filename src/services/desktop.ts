@@ -8,7 +8,9 @@ import type {
   ProjectSummary,
   Settings,
   SnapOptions,
+  BatchSnapOptions,
   CleanupOptions,
+  AnimationCleanupSettings,
   ExportOptions,
   ExtractionOptions,
   ManualCrop,
@@ -29,10 +31,16 @@ export const desktop = {
   openProject: (projectId: string) =>
     invoke<Project>("open_project", { projectId }),
   updateWorkflow: (projectId: string, workflow: WorkflowSettings) => invoke<Project>("update_workflow", { projectId, workflow }),
+  updateAnimationCleanupSettings: (projectId: string, animationId: string, cleanupSettings: AnimationCleanupSettings) =>
+    invoke<Project>("update_animation_cleanup_settings", { projectId, animationId, cleanupSettings }),
   updateRuntime: (projectId: string, cellWidth: number, cellHeight: number, pivotX: number, pivotY: number, anchorMode: WorkflowSettings["anchorMode"]) => invoke<Project>("update_runtime", { projectId, cellWidth, cellHeight, pivotX, pivotY, anchorMode }),
   updateRuntimePolicy: (projectId: string, geometryPolicy: Project["runtime"]["geometryPolicy"], neutralHeightTarget: number | null, neutralTolerancePx: number) => invoke<Project>("update_runtime_policy", { projectId, geometryPolicy, neutralHeightTarget, neutralTolerancePx }),
   confirmNativeReview: (projectId: string, animationId: string, acceptedFrameIds: string[]) => invoke<Project>("confirm_native_review", { projectId, animationId, acceptedFrameIds }),
-  replaceRawFrame: (projectId: string, animationId: string, frameId: string, sourcePath: string | null, crop: ManualCrop | null) => invoke<Project>("replace_raw_frame", { projectId, animationId, frameId, sourcePath, crop }),
+  replaceRawFrame: (projectId: string, animationId: string, frameId: string, sourcePath: string | null, sourceReviewId: string | null, crop: ManualCrop | null, options: ExtractionOptions) => invoke<Project>("replace_raw_frame", { projectId, animationId, frameId, sourcePath, sourceReviewId, crop, options }),
+  applyFrameRecovery: (projectId: string, animationId: string, reviewId: string) => invoke<Project>("apply_frame_recovery", { projectId, animationId, reviewId }),
+  frameRecoveryPreview: (projectId: string, animationId: string, reviewId: string) => invoke<AssetPreview>("read_frame_recovery_preview", { projectId, animationId, reviewId }),
+  frameSourcePreview: (projectId: string, animationId: string, frameId: string) => invoke<AssetPreview>("read_frame_source_preview", { projectId, animationId, frameId }),
+  frameRecoverySourcePreview: (projectId: string, animationId: string, reviewId: string) => invoke<AssetPreview>("read_frame_recovery_source_preview", { projectId, animationId, reviewId }),
   importUpscaledFrame: (projectId: string, animationId: string, sourceFrameId: string, sourcePath: string) => invoke<Project>("import_upscaled_frame", { projectId, animationId, sourceFrameId, sourcePath }),
   approveUpscale: (projectId: string, animationId: string) => invoke<Project>("approve_upscale", { projectId, animationId }),
   exportSnapped: (projectId: string, animationId: string, destinationPath: string, sourceFrameIds: string[]) => invoke<string>("export_snapped", { projectId, animationId, destinationPath, sourceFrameIds }),
@@ -103,7 +111,8 @@ export const desktop = {
     invoke<Project>("apply_pose_extraction", { projectId, animationId, reviewId, orderedBoxIds, manualCrops }),
   rawAnimationFrame: (projectId: string, animationId: string, frameId: string) =>
     invoke<AssetPreview>("read_raw_animation_frame", { projectId, animationId, frameId }),
-  runBatchSnap: (projectId: string, animationId: string, options: SnapOptions) =>
+  analyzeBatchScale: (projectId: string, animationId: string, options: SnapOptions) => invoke<Project>("analyze_batch_scale", { projectId, animationId, options }),
+  runBatchSnap: (projectId: string, animationId: string, options: BatchSnapOptions) =>
     invoke<Project>("run_batch_snap", { projectId, animationId, options }),
   runBatchAutoFit: (projectId: string, animationId: string, cleanupOptions: CleanupOptions) =>
     invoke<Project>("run_batch_auto_fit", { projectId, animationId, cleanupOptions }),
